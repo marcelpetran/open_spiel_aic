@@ -6,7 +6,8 @@ import jax.numpy as jnp
 
 from open_spiel.python.algorithms.sepot.rnad_sepot import RNaDConfig, RNaDSolver
 from open_spiel.python.algorithms.sepot.cfr_sepot import SePoTCFR
-from open_spiel.python.algorithms.reconstruct_public_state import reconstruct_battleship, reconstruct_goofspiel
+from open_spiel.python.algorithms.sepot.cfr_sepot_matrix import SePoTMatrixCFR
+from open_spiel.python.algorithms.reconstruct_public_state import reconstruct_battleship, reconstruct_goofspiel, ReconstructType
 
 
 def actions_per_player(state: pyspiel.State, player: int):
@@ -43,9 +44,9 @@ class SePoT_RNaD:
 
   def compute_policy(self, state: pyspiel.State, player: int):
     if self.rnad.config.game_name == "goofspiel":
-      histories, use_search = reconstruct_goofspiel(state, self.config.subgame_size_limit)
+      histories, use_search = reconstruct_goofspiel(state, self.config.subgame_size_limit, ReconstructType.PUBLIC_STATE, player)
     elif self.rnad.config.game_name == "battleship":
-      histories, use_search = reconstruct_battleship(state, self.config.subgame_size_limit)
+      histories, use_search = reconstruct_battleship(state, self.config.subgame_size_limit, ReconstructType.PUBLIC_STATE, player)
     else:
       assert False
     if not use_search:
@@ -56,10 +57,13 @@ class SePoT_RNaD:
     
     
     subgame_solver = SePoTCFR(self, states, counterfactual_values, reaches[player], reaches[-1], player, self.config.subgame_depth_limit, create_gadget)
+    #subgame_solver = SePoTMatrixCFR(self, states, counterfactual_values, reaches[player], reaches[-1], player, self.config.subgame_depth_limit, create_gadget)
     
     subgame_solver._alternating_updates = False
     # subgame_solver.multiple_steps(self.config.resolve_iterations)
     subgame_solver.multiple_steps(self.config.resolve_iterations)
+    #print("Step stateful for player ", player)
+    #subgame_solver.multiple_steps_stateful(self.config.resolve_iterations)
     
     policy = subgame_solver.average_policy_dict(player)
     

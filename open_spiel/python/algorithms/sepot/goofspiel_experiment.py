@@ -56,7 +56,7 @@ parser.add_argument("--cards", default=5, type=int, help="Goofspiel cards")
 parser.add_argument("--points_order", default="descending", type=str, help="Oredering of point card, choose between 'descending', 'ascending' and 'random'")
 
 # Evaluate setting
-parser.add_argument("--saved_model", default="sepot_networks/goofspiel_4_descending/full_sepot_test.pkl", type=str, help="Path to a saved model")
+parser.add_argument("--saved_model", default="sepot_networks/goofspiel_5_descending/full_sepot_test.pkl", type=str, help="Path to a saved model")
 
 def train():
   args = parser.parse_args([] if "__file__" not in globals() else None)
@@ -183,7 +183,7 @@ def full_sepot_test():
   
   sepot_config = sepot.SePoTConfig(
         rnad_config = rnad_config,
-        resolve_iterations = 1000,
+        resolve_iterations = 3000,
         subgame_size_limit = 10000000,
         subgame_depth_limit = 2)
   sepot_solver = sepot.SePoT_RNaD(sepot_config)
@@ -242,6 +242,6 @@ def evaluate():
 
 
 if __name__ == "__main__":
-  # full_sepot_test()
-  # evaluate()
-  train()
+  #full_sepot_test()
+  evaluate()
+  # train()

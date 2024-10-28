@@ -26,7 +26,7 @@ from open_spiel.python.jax.cfr.jax_cfr import JaxCFR, update_regrets_plus, regre
 
 
 @chex.dataclass(frozen=True)
-class SePoTCFRConstants:
+class SePoTMatrixCFRConstants:
   players: int
   max_depth: int
   max_actions: int # This includes chance outcomes!  
@@ -44,9 +44,9 @@ class SePoTCFRConstants:
   init_iset_reaches: chex.Array = () # For each iset of resolving player
   init_chance: chex.ArrayTree = ()
 
-  multi_valued_states_isets: chex.Array = ()  # For Opponent
-  multi_valued_states_actions: chex.Array = () # For opponent
-  multi_valued_states_previous_actions: chex.Array = () # For resolving player
+  multi_valued_states_isets: chex.Array = ()  # For both players
+  multi_valued_states_actions: chex.Array = () # For both players
+  multi_valued_states_previous_actions: chex.Array = () # For both players
   multi_valued_states_utilities: chex.Array = () # From First player perspective
   multi_valued_states_chance_probabilities: chex.Array = () # 
 
@@ -69,7 +69,7 @@ class SePoTCFRConstants:
   
 
 
-class SePoTCFR(JaxCFR):
+class SePoTMatrixCFR(JaxCFR):
   def __init__(self, sepot, states: list[pyspiel.State], counterfactual_values: list[float], player_reaches: list[float], chance_reaches:list[float], player:int, depth_limit: int, construct_gadget: bool, multi_valued_states: list = []):
     assert len(states) == len(counterfactual_values)
     assert len(states) == len(player_reaches)
@@ -95,7 +95,7 @@ class SePoTCFR(JaxCFR):
   def init(self, states: list[pyspiel.State], counterfactual_values: list[float], player_reaches: list[float], chance_reaches:list[float], player: int, depth_limit: int, construct_gadget: bool):
     opponent = 1 - player
     players = 2
-    transformations = self.sepot.rnad.config.num_transformations + 1
+    transformations = (self.sepot.rnad.config.num_transformations + 1)
 
     depth_history_utility = [[] for _ in range(players)]
     depth_history_previous_iset = [[] for _ in range(players)]
@@ -109,9 +109,9 @@ class SePoTCFR(JaxCFR):
     depth_history_action_mask = []
     depth_history_chance_probabilities = [] 
 
-    multi_valued_states_isets = []
-    multi_valued_states_actions = []
-    multi_valued_states_previous_actions = []
+    multi_valued_states_isets = [[] for _ in range(players)]
+    multi_valued_states_actions = [[] for _ in range(players)]
+    multi_valued_states_previous_actions = [[] for _ in range(players)]
     multi_valued_states_utilities = []
     multi_valued_states_chance_probabilities = []
 
@@ -180,15 +180,17 @@ class SePoTCFR(JaxCFR):
         else:
         # TODO: Cache states and then call network for batch
           # assert False
-          if state.information_state_string(opponent) not in multi_valued_isets_dict:
-            multi_valued_isets_dict[state.information_state_string(opponent)] = multi_valued_states_ids[0]
-            multi_valued_states_ids[0] += 1
-          multi_valued_states = self.sepot.rnad.get_multi_valued_states(state, player)
-          # if state.information_state_string(opponent) == "T=4 Player=1 /v_0_0/shot_P0_0_0:H/shot_P1_1_0:H":
-          #   print(state.state_tensor())
-          multi_valued_states_isets.append(multi_valued_isets_dict[state.information_state_string(opponent)])
-          multi_valued_states_actions.append([i + multi_valued_isets_dict[state.information_state_string(opponent)] * transformations for i in range(transformations)])
-          multi_valued_states_previous_actions.append(previous_info.actions[player])
+          multi_valued_states = self.sepot.rnad.get_matrix_valued_states(state).reshape((-1, transformations))
+          for pl in range(players):
+            opp = 1 - pl
+            if state.information_state_string(1 - pl) not in multi_valued_isets_dict:
+              multi_valued_isets_dict[state.information_state_string(opp)] = multi_valued_states_ids[0]
+              multi_valued_states_ids[0] += 1
+            # if state.information_state_string(opponent) == "T=4 Player=1 /v_0_0/shot_P0_0_0:H/shot_P1_1_0:H":
+            #   print(state.state_tensor())
+            multi_valued_states_isets[opp].append(multi_valued_isets_dict[state.information_state_string(opp)])
+            multi_valued_states_actions[opp].append([i + multi_valued_isets_dict[state.information_state_string(opp)] * transformations for i in range(transformations)])
+            multi_valued_states_previous_actions[pl].append(previous_info.actions[pl])
           multi_valued_states_chance_probabilities.append(chance)
           if self._use_rnad_multi_valued_states:
             multi_valued_states_utilities.append(multi_valued_states)
@@ -397,7 +399,7 @@ class SePoTCFR(JaxCFR):
       multi_valued_states_previous_actions = []
       multi_valued_states_chance_probabilities = []
 
-    self.constants = SePoTCFRConstants(
+    self.constants = SePoTMatrixCFRConstants(
       players = players,
       max_depth = int(len(depth_history_utility[0])),
       max_actions = distinct_actions,
@@ -509,7 +511,6 @@ class SePoTCFR(JaxCFR):
     regrets = [self.update_regrets(regrets[pl]) for pl in range(self.constants.players)]
  
     averages = [jnp.where(jnp.logical_or(player == pl, player == JAX_CFR_SIMULTANEOUS_UPDATE), averages[pl] + current_strategies[pl]  * iset_reaches[pl][..., jnp.newaxis]  * average_policy_update_coefficient, averages[pl]) for pl in range(self.constants.players)]
-    #id_print(averages[0])
 
     return regrets, averages 
   
@@ -539,32 +540,53 @@ class SePoTCFR(JaxCFR):
     realization_plans = self.propagate_strategy(weighted_strategies)
     iset_reaches = [jnp.sum(realization_plans[pl], -1) for pl in range(self.constants.players)]
     # In last row, there are only terminal, so we start row before it
+    #id_print(realization_plans[pl].ravel()[self.constants.multi_valued_states_previous_actions[pl]])
+    #id_print(history_value[pl])
     if self.constants.reached_depth_limit:
-      mvs_current = self.regret_matching(mvs_regrets, jnp.ones_like(mvs_regrets))
-      mvs_curr_policy = mvs_current[self.constants.multi_valued_states_isets]
-      action_value = self.constants.multi_valued_states_utilities * (2 * self.constants.resolving_player - 1) # we are interested in opponents_value
-      history_value = jnp.sum(action_value * mvs_curr_policy, -1)
-      regret = (action_value - history_value[..., jnp.newaxis])
-      regret = regret * (realization_plans[self.constants.resolving_player].ravel()[self.constants.multi_valued_states_previous_actions] * self.constants.multi_valued_states_chance_probabilities)[..., jnp.newaxis]
-
-      bin_regrets = jnp.bincount(self.constants.multi_valued_states_actions.ravel(), regret.ravel(), length = self.constants.multi_valued_states_ids * self.constants.transformations)
-      bin_regrets = bin_regrets.reshape(-1, self.constants.transformations)
-      mvs_regrets = jnp.where(jnp.logical_or(player == 1 - self.constants.resolving_player, player == JAX_CFR_SIMULTANEOUS_UPDATE), mvs_regrets + bin_regrets, mvs_regrets)
       depth_utils = [[] for _ in range(self.constants.players)]
-      depth_utils[1 - self.constants.resolving_player] = [history_value]
-      depth_utils[self.constants.resolving_player] = [-history_value]
-      #depth_utils = [[history_value], [-history_value]]
+      mvs_current = [self.regret_matching(mvs_regrets[pl], jnp.ones_like(mvs_regrets[pl])) for pl in range (self.constants.players)]
+      for pl in range(self.constants.players):
+        opp = 1 - pl
+        #mvs_current = self.regret_matching(mvs_regrets[opp], jnp.ones_like(mvs_regrets[opp]))
+        mvs_curr_opp_policy = mvs_current[opp][self.constants.multi_valued_states_isets[opp]]
+        #id_print(mvs_curr_opp_policy)
+        mvs_curr_policy = mvs_current[pl][self.constants.multi_valued_states_isets[pl]]
+        #id_print(mvs_curr_policy)
+        action_value = self.constants.multi_valued_states_utilities * (1 - 2 * pl) # Current player value
+        #transpose the matrix game for each infoset if resolving for player 1 so
+        # so that opponent is always the row player
+        if(pl == 0) :
+          action_value = jnp.transpose(action_value, (0, 2, 1))
+
+        #print(self.constants.multi_valued_states_chance_probabilities.shape)
+        #to get the action value for the opponent multiply rows of the matrix by
+        # realization plans of current player and then sum it over the collumns
+        #action_value = action_value * (realization_plans[pl].ravel()[self.constants.multi_valued_states_previous_actions[pl]][..., jnp.newaxis][..., jnp.newaxis] * self.constants.multi_valued_states_chance_probabilities[..., jnp.newaxis][..., jnp.newaxis])
+        action_value = jnp.sum(action_value * mvs_curr_opp_policy[..., jnp.newaxis], axis=1 )
+        history_value = jnp.sum(action_value * mvs_curr_policy, -1)
+        regret = (action_value - history_value[..., jnp.newaxis])
+        regret = regret * (realization_plans[opp].ravel()[self.constants.multi_valued_states_previous_actions[opp]] * self.constants.multi_valued_states_chance_probabilities)[..., jnp.newaxis]
+
+        bin_regrets = jnp.bincount(self.constants.multi_valued_states_actions[pl].ravel(), regret.ravel(), length = self.constants.multi_valued_states_ids * self.constants.transformations)
+        bin_regrets = bin_regrets.reshape(-1, self.constants.transformations)
+        #mvs_regrets[opp] = mvs_regrets[opp] + bin_regrets
+        mvs_regrets[pl] = jnp.where(jnp.logical_or(player == pl, player == JAX_CFR_SIMULTANEOUS_UPDATE), mvs_regrets[pl] + bin_regrets, mvs_regrets[pl])
+          #mvs_regrets[pl] = mvs_regrets.at[pl].set(jnp.where(jnp.logical_or(pl == 1 - self.constants.resolving_player, player == JAX_CFR_SIMULTANEOUS_UPDATE), mvs_regrets[pl] + bin_regrets, mvs_regrets[pl]))
+        mvs_regrets[pl] = jnp.maximum(mvs_regrets[pl], 0.0)
+        depth_utils[pl] = [history_value ]
+        #depth_utils[self.constants.resolving_player] = [-history_value]
+      #depth_utils = [[-history_value], [history_value]]
 
 
-      #weighted_multi_valued_states = self.constants.multi_valued_states_utilities * (realization_plans[self.constants.resolving_player].ravel()[self.constants.multi_valued_states_previous_actions] * self.constants.multi_valued_states_chance_probabilities)[..., jnp.newaxis]
-      #bin_regrets = jnp.bincount(self.constants.multi_valued_states_actions.ravel(), weighted_multi_valued_states.ravel(), length = self.constants.multi_valued_states_ids * self.constants.transformations)
-      #bin_regrets = bin_regrets.reshape(-1, self.constants.transformations)
-      # Values are from perspective of resolving player, so opponent chooses minimum
-      #best_action = jnp.where(self.constants.resolving_player == 0, jnp.argmin(bin_regrets, -1), jnp.argmax(bin_regrets, -1))
-      #best_action_per_state = best_action[self.constants.multi_valued_states_isets]
-      #multi_valued_states_utility =jnp.choose(best_action_per_state, self.constants.multi_valued_states_utilities.T, mode='clip')
+      # weighted_multi_valued_states = self.constants.multi_valued_states_utilities * (realization_plans[self.constants.resolving_player].ravel()[self.constants.multi_valued_states_previous_actions] * self.constants.multi_valued_states_chance_probabilities)[..., jnp.newaxis]
+      # bin_regrets = jnp.bincount(self.constants.multi_valued_states_actions.ravel(), weighted_multi_valued_states.ravel(), length = self.constants.multi_valued_states_ids * self.constants.transformations)
+      # bin_regrets = bin_regrets.reshape(-1, self.constants.transformations)
+      # # Values are from perspective of resolving player, so opponent chooses minimum
+      # best_action = jnp.where(self.constants.resolving_player == 0, jnp.argmin(bin_regrets, -1), jnp.argmax(bin_regrets, -1))
+      # best_action_per_state = best_action[self.constants.multi_valued_states_isets]
+      # multi_valued_states_utility =jnp.choose(best_action_per_state, self.constants.multi_valued_states_utilities.T, mode='clip')
       
-      #depth_utils = [[jnp.where(self.constants.multi_valued_states_isets > 0, (1 - (2 *pl)) * multi_valued_states_utility, self.constants.depth_history_utility[pl][-1])] for pl in range(self.constants.players)]
+      # depth_utils = [[jnp.where(self.constants.multi_valued_states_isets > 0, (1 - (2 *pl)) * multi_valued_states_utility, self.constants.depth_history_utility[pl][-1])] for pl in range(self.constants.players)]
     else:
       depth_utils = [[self.constants.depth_history_utility[pl][-1]] for pl in range(self.constants.players)]
     for i in range(self.constants.max_depth -2, -1, -1):
@@ -584,10 +606,10 @@ class SePoTCFR(JaxCFR):
         bin_regrets = jnp.bincount(self.constants.depth_history_actions[pl][i].ravel(), regret.ravel(), length = self.constants.isets[pl] * self.constants.max_actions)
         bin_regrets = bin_regrets.reshape(-1, self.constants.max_actions)
         regrets[pl] = jnp.where(jnp.logical_or(player == pl, player == JAX_CFR_SIMULTANEOUS_UPDATE), regrets[pl] + bin_regrets, regrets[pl])
-        depth_utils[pl].append(history_value) 
+        depth_utils[pl][-1] = history_value 
 
     regrets = [self.update_regrets(regrets[pl]) for pl in range(self.constants.players)]
-
+ 
     averages = [jnp.where(jnp.logical_or(player == pl, player == JAX_CFR_SIMULTANEOUS_UPDATE), averages[pl] + current_strategies[pl]  * iset_reaches[pl][..., jnp.newaxis]  * average_policy_update_coefficient, averages[pl]) for pl in range(self.constants.players)]
 
     return regrets, averages, mvs_regrets
@@ -595,7 +617,13 @@ class SePoTCFR(JaxCFR):
   def average_policy_dict(self, player: int = -1):
     """Extracts the average_policy from the JAX structures into the TabularPolicy""" 
     averages = [np.asarray(self.averages[pl]) for pl in range(self.constants.players)]
-    averages = [averages[pl] / np.sum(averages[pl], -1, keepdims=True) for pl in range(self.constants.players)]
+    #print("Before", averages)
+    #print(averages[0].shape)
+    averages = [np.where( np.sum(averages[pl], -1, keepdims=True) == 0, np.ones_like(averages[pl]) / averages[pl].shape[-1], averages[pl] / np.sum(averages[pl], -1, keepdims=True)) for pl in range(self.constants.players)]
+    #for pl in range(self.constants.players):
+      #if(np.sum(averages[pl], -1) == 0):
+          #averages[pl] = averages[pl]
+    #print("After", averages)
 
     avg_strategy = {}
 
@@ -609,9 +637,15 @@ class SePoTCFR(JaxCFR):
     return avg_strategy
   
   def multiple_steps_stateful(self, iterations):
-    self.mvs_regrets = jnp.zeros((self.constants.multi_valued_states_ids, self.constants.transformations))
-    #id_print(self.regrets)
+    #if self.sepot.rnad.config.matrix_valued_states:
+      #self.mvs_regrets = [jnp.zeros((self.constants.multi_valued_states_ids, self.constants.transformations)) for _ in range(2)]
+    #else :
+    #self.mvs_regrets = jnp.zeros((self.constants.multi_valued_states_ids, self.sepot.rnad.config.num_transformations + 1))
+    self.mvs_regrets = [jnp.zeros((self.constants.multi_valued_states_ids, self.constants.transformations)) for _ in range(2)]
+    #print(self.mvs_regrets.shape)
     for i in range(iterations):
+      #print("Iteration ", i)
+      #print(self.mvs_regrets.shape)
       averaging_coefficient = i + 1 if self._linear_averaging else 1
       if self._alternating_updates:
         for player in range(self.constants.players):

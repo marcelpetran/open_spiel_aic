@@ -28,6 +28,7 @@ import numpy as np
 import optax
 
 from open_spiel.python import policy as policy_lib
+from jax.experimental.host_callback import id_print
 import pyspiel
 
 
@@ -1074,7 +1075,10 @@ class RNaDSolver(policy_lib.Policy):
     # Consider having 1 transformation and identity for each player, then the order is [(I, I), (I, T), (T, I), (T, T)]
     # In matrix style, the rows are transformations of P1 and columns of P2.
     if self.config.matrix_valued_states:
+      #print(ts.env)
       p1_transformation_direction = transformation_rollout(transformation_params[0], ts.env)
+      #print(p1_transformation_direction.shape)
+      #print(ts.actor.policy.shape)
       p1_transformation_direction = normalize_direction_with_mask(p1_transformation_direction, ts.env.legal)
       # Transforming only policy of a single player
       p1_transformation_direction = jnp.where(ts.env.player_id[..., jnp.newaxis, jnp.newaxis] == 0, p1_transformation_direction, 0)
@@ -1087,10 +1091,13 @@ class RNaDSolver(policy_lib.Policy):
       mvs_p2_transformations = jnp.concatenate((jnp.zeros_like(ts.actor.policy)[..., jnp.newaxis], p2_transformation_direction), axis=-1)
 
       
-
+      
+      #print(mvs_p1_transformations.shape)
+      #print(mvs_p2_transformations.shape)
       mvs_p1_transformations = jnp.repeat(mvs_p1_transformations, self.config.num_transformations + 1, axis=-1)
       mvs_p2_transformations = jnp.tile(mvs_p2_transformations, self.config.num_transformations + 1)
       mvs_transformations = mvs_p1_transformations + mvs_p2_transformations
+      #print(mvs_transformations.shape)
 
 
     # Multi Valued states
@@ -1365,21 +1372,24 @@ class RNaDSolver(policy_lib.Policy):
   def get_multi_valued_states(self, state: pyspiel.State, player:int = -1):
     env_step = self._batch_of_states_as_env_step([state])
     multi_valued_states = self._jit_get_multi_valued_states(self.mvs_params_target, env_step)[0]
-    # print("MVS: ")
-    # print(state.history_str())
     if self.config.matrix_valued_states:
       if player == 0:
         multi_valued_states = multi_valued_states[:self.config.num_transformations + 1]
       elif player == 1:
         multi_valued_states = multi_valued_states[::self.config.num_transformations + 1]
+      #return np.asarray(multi_valued_states)
     else:
       if player == 0:
         multi_valued_states = multi_valued_states[:self.config.num_transformations + 1]
       elif player == 1:
         multi_valued_states = multi_valued_states[jnp.r_[0, self.config.num_transformations + 1:2 * self.config.num_transformations + 1]]
-    # print(multi_valued_states)
+    #print("Second", multi_valued_states.shape)
     return np.asarray(multi_valued_states)
   
+  def get_matrix_valued_states(self, state: pyspiel.State):  
+    env_step = self._batch_of_states_as_env_step([state])
+    multi_valued_states = self._jit_get_multi_valued_states(self.mvs_params_target, env_step)[0]
+    return np.asarray(multi_valued_states)
   # def get_next_state(self, )
 
   @functools.partial(jax.jit, static_argnums=(0,))
