@@ -20,7 +20,6 @@ import numpy as np
 import functools 
 
 from collections import namedtuple
-from jax.experimental.host_callback import id_print
  
 from open_spiel.python.jax.cfr.jax_cfr import JaxCFR, update_regrets_plus, regret_matching, JAX_CFR_SIMULTANEOUS_UPDATE
 
@@ -465,8 +464,6 @@ class SePoTCFR(JaxCFR):
       player: Player for which the update should be done. When alternating updates are distables, it is JAX_CFR_SIMULTANEOUS_UPDATE
     """ 
 
-    #print(self.constants.multi_valued_states_utilities.shape)
-    #print(self.constants.resolving_player.shape)
     current_strategies = [self.regret_matching(regrets[pl], self.constants.iset_action_mask[pl]) for pl in range(self.constants.players)]
 
     weighted_strategies = [jnp.copy(current_strategies[pl]) for pl in range(self.constants.players)]
@@ -509,7 +506,6 @@ class SePoTCFR(JaxCFR):
     regrets = [self.update_regrets(regrets[pl]) for pl in range(self.constants.players)]
  
     averages = [jnp.where(jnp.logical_or(player == pl, player == JAX_CFR_SIMULTANEOUS_UPDATE), averages[pl] + current_strategies[pl]  * iset_reaches[pl][..., jnp.newaxis]  * average_policy_update_coefficient, averages[pl]) for pl in range(self.constants.players)]
-    #id_print(averages[0])
 
     return regrets, averages 
   
@@ -529,8 +525,6 @@ class SePoTCFR(JaxCFR):
       player: Player for which the update should be done. When alternating updates are distables, it is JAX_CFR_SIMULTANEOUS_UPDATE
     """ 
 
-    #print(self.constants.multi_valued_states_utilities.shape)
-    #print(mvs_regrets.shape)
     current_strategies = [self.regret_matching(regrets[pl], self.constants.iset_action_mask[pl]) for pl in range(self.constants.players)]
 
     weighted_strategies = [jnp.copy(current_strategies[pl]) for pl in range(self.constants.players)]
@@ -553,18 +547,6 @@ class SePoTCFR(JaxCFR):
       depth_utils = [[] for _ in range(self.constants.players)]
       depth_utils[1 - self.constants.resolving_player] = [history_value]
       depth_utils[self.constants.resolving_player] = [-history_value]
-      #depth_utils = [[history_value], [-history_value]]
-
-
-      #weighted_multi_valued_states = self.constants.multi_valued_states_utilities * (realization_plans[self.constants.resolving_player].ravel()[self.constants.multi_valued_states_previous_actions] * self.constants.multi_valued_states_chance_probabilities)[..., jnp.newaxis]
-      #bin_regrets = jnp.bincount(self.constants.multi_valued_states_actions.ravel(), weighted_multi_valued_states.ravel(), length = self.constants.multi_valued_states_ids * self.constants.transformations)
-      #bin_regrets = bin_regrets.reshape(-1, self.constants.transformations)
-      # Values are from perspective of resolving player, so opponent chooses minimum
-      #best_action = jnp.where(self.constants.resolving_player == 0, jnp.argmin(bin_regrets, -1), jnp.argmax(bin_regrets, -1))
-      #best_action_per_state = best_action[self.constants.multi_valued_states_isets]
-      #multi_valued_states_utility =jnp.choose(best_action_per_state, self.constants.multi_valued_states_utilities.T, mode='clip')
-      
-      #depth_utils = [[jnp.where(self.constants.multi_valued_states_isets > 0, (1 - (2 *pl)) * multi_valued_states_utility, self.constants.depth_history_utility[pl][-1])] for pl in range(self.constants.players)]
     else:
       depth_utils = [[self.constants.depth_history_utility[pl][-1]] for pl in range(self.constants.players)]
     for i in range(self.constants.max_depth -2, -1, -1):
@@ -610,7 +592,6 @@ class SePoTCFR(JaxCFR):
   
   def multiple_steps_stateful(self, iterations):
     self.mvs_regrets = jnp.zeros((self.constants.multi_valued_states_ids, self.constants.transformations))
-    #id_print(self.regrets)
     for i in range(iterations):
       averaging_coefficient = i + 1 if self._linear_averaging else 1
       if self._alternating_updates:

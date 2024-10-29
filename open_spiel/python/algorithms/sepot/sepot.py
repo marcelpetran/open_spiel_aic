@@ -56,14 +56,10 @@ class SePoT_RNaD:
     create_gadget = actions_per_player(state, 1 - player) > 0
     
     
-    subgame_solver = SePoTCFR(self, states, counterfactual_values, reaches[player], reaches[-1], player, self.config.subgame_depth_limit, create_gadget)
-    #subgame_solver = SePoTMatrixCFR(self, states, counterfactual_values, reaches[player], reaches[-1], player, self.config.subgame_depth_limit, create_gadget)
+    subgame_solver = SePoTMatrixCFR(self, states, counterfactual_values, reaches[player], reaches[-1], player, self.config.subgame_depth_limit, create_gadget)
     
     subgame_solver._alternating_updates = False
-    # subgame_solver.multiple_steps(self.config.resolve_iterations)
-    subgame_solver.multiple_steps(self.config.resolve_iterations)
-    #print("Step stateful for player ", player)
-    #subgame_solver.multiple_steps_stateful(self.config.resolve_iterations)
+    subgame_solver.multiple_steps_stateful(self.config.resolve_iterations)
     
     policy = subgame_solver.average_policy_dict(player)
     
