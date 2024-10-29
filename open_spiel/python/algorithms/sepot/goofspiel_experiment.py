@@ -242,6 +242,6 @@ def evaluate():
 
 
 if __name__ == "__main__":
-  # full_sepot_test()
-  # evaluate()
+  #full_sepot_test()
+  #evaluate()
   train()
