@@ -23,11 +23,18 @@ results are exactly the same.
 # pylint: disable=g-importing-member
 
 import time
+import argparse
 from open_spiel.python.algorithms.best_response import BestResponsePolicy
 from open_spiel.python.algorithms.cfr import CFRPlusSolver
 from open_spiel.python.jax.cfr.jax_cfr import JaxCFR
 from open_spiel.python.jax.cfr.jax_simultaneous_cfr import SimultaneousJaxCFR
+from open_spiel.python.algorithms import exploitability
 import pyspiel
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument("--cards", default=5, type=int, help="Number of goofspiel cards")
+parser.add_argument("--test_turn_based", default= False, type=bool, help= "Whether to load the game for SM-CFR as turn-based or not")
 
 
 def compare_cfr_with_jax_cfr(game):
@@ -60,39 +67,52 @@ def compare_cfr_with_jax_cfr(game):
   print("Jax P2: ", jax_br2.value(jax_cfr.game.new_initial_state()))
   print("CFR P2: ", cfr_br2.value(jax_cfr.game.new_initial_state()))
 
-def compare_simultaneous_with_jax(game_name, game_params) :
+def compare_simultaneous_with_jax(game_name, game_params, load_as_turn_based) :
+
   game = pyspiel.load_game_as_turn_based(game_name, game_params)
 
   start = time.time()
   jax_cfr = JaxCFR(game)
-  print(time.time() - start)
+  print("CFR init", time.time() - start)
   jax_cfr.multiple_steps(10000)
-  print(time.time() - start)
+  print("CFR run", time.time() - start)
   
-  game = pyspiel.load_game(game_name, game_params)
+  if load_as_turn_based:
+    print("Loading as turn based")
+    game = pyspiel.load_game_as_turn_based(game_name, game_params)
+  else:
+    print("Loading as simultaneous")
+    game = pyspiel.load_game(game_name, game_params)
 
   start = time.time()
   simultaneous_jax_cfr = SimultaneousJaxCFR(game)
-  print(time.time() - start)
+  print("SM-CFR init", time.time() - start)
   simultaneous_jax_cfr.multiple_steps(10000)
-  print(time.time() - start)
+  print("SM-CFR run", time.time() - start)
 
   jax_strat = jax_cfr.average_policy()
   jax_br1 = BestResponsePolicy(jax_cfr.game, 1, jax_strat)
   jax_br2 = BestResponsePolicy(jax_cfr.game, 0, jax_strat)
+  
+  #print("Finished computing jax")
 
   simultaneous_jax_strat = simultaneous_jax_cfr.average_policy()
   simultaneous_jax_br1 = BestResponsePolicy(simultaneous_jax_cfr.game, 1, simultaneous_jax_strat)
   simultaneous_jax_br2 = BestResponsePolicy(simultaneous_jax_cfr.game, 0, simultaneous_jax_strat)
 
-  print("Simultaneous Jax policy: ", simultaneous_jax_strat.policy_for_key(simultaneous_jax_cfr.game.new_initial_state().information_state_string(0)))
-  print("Jax policy: ", jax_strat.policy_for_key(jax_cfr.game.new_initial_state().information_state_string()))
   print("Simultaneous Jax P1: ", simultaneous_jax_br1.value(simultaneous_jax_cfr.game.new_initial_state()))
   print("Jax P1: ", jax_br1.value(jax_cfr.game.new_initial_state()))
   print("Simultaneous Jax P2: ", simultaneous_jax_br2.value(simultaneous_jax_cfr.game.new_initial_state()))
   print("Jax P2: ", jax_br2.value(jax_cfr.game.new_initial_state()))
+  # exploitability only works on turn based games
+  if load_as_turn_based:
+    jax_exploitability = exploitability.exploitability(jax_cfr.game, jax_strat)
+    simultaneous_jax_exploitability = exploitability.exploitability(simultaneous_jax_cfr.game, simultaneous_jax_strat)
+    print("Simultaneous Jax exploitability: ", simultaneous_jax_exploitability)
+    print("Jax exploitability: ", jax_exploitability)
 
 
 if __name__ == "__main__":
-  game_params = {"num_cards": 5, "imp_info": True, "points_order": "descending"}
-  compare_simultaneous_with_jax(game_name="goofspiel", game_params=game_params)
+  args = parser.parse_args()
+  game_params = {"num_cards": args.cards, "imp_info": True, "points_order": "descending"}
+  compare_simultaneous_with_jax(game_name="goofspiel", game_params=game_params, load_as_turn_based=args.test_turn_based)

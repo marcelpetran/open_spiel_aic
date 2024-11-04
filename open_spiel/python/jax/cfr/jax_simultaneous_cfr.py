@@ -40,6 +40,8 @@ import pyspiel
 
 JAX_CFR_SIMULTANEOUS_UPDATE = -5
 SPIEL_SIMULTANEOUS_PLAYER = -2
+SPIEL_TERMINAL_PLAYER = -4
+SPIEL_INVALID_ACTION = -1
 
 
 def regret_matching(regret, mask):
@@ -101,6 +103,8 @@ class SimultaneousJaxCFRConstants:
 
 class SimultaneousJaxCFR:
   """Class for CFR that treats all games as simultaneous move games.
+    While this implementation can work on turn-based games, the performance will 
+    be lower and you should use JaxCFR instead.
 
   First it prepares all the structures in `init`, then it just reuses them
   within jitted function `jit_step`.
@@ -126,6 +130,11 @@ class SimultaneousJaxCFR:
 
     # This implementation will only work for 2 player games !!!
     players = 2
+    game_type = self.game.get_type()
+    dynamics = game_type.dynamics
+    # for sequenital games create a fake action so that the algorithm will work
+    use_mock_action = dynamics == game_type.Dynamics.SEQUENTIAL
+    mock_actions = [SPIEL_INVALID_ACTION] if use_mock_action else [] 
     depth_history_utility = [[] for _ in range(players)]
     depth_history_previous_iset = [[] for _ in range(players)]
     depth_history_previous_action = [[] for _ in range(players)]
@@ -144,12 +153,12 @@ class SimultaneousJaxCFR:
     ids = [0 for _ in range(players)]
     pl_isets = [{} for _ in range(players)]
     distinct_actions = max(
-        self.game.num_distinct_actions(), self.game.max_chance_outcomes()
+        self.game.num_distinct_actions() + int(use_mock_action), self.game.max_chance_outcomes() + int(use_mock_action)
     )
     distinct_joint_actions = distinct_actions ** 2
 
     for pl in range(players):
-      pl_isets[pl][''] = ids[pl]
+      pl_isets[pl][''] = (ids[pl], False)
       ids[pl] += 1
       am = [0] * distinct_actions
       am[0] = 1
@@ -189,8 +198,9 @@ class SimultaneousJaxCFR:
       depth_history_previous_history[depth].append(previous_info.history)
       actions_mask = [[0] * distinct_actions for _ in range(players)]
       for pl in range(players) :
-        for a in state.legal_actions(pl):
-            actions_mask[pl][a] = 1
+        actions =  state.legal_actions(pl) if pl == state.current_player() else mock_actions + state.legal_actions(pl)
+        for a in actions:
+            actions_mask[pl][a + int(use_mock_action)] = 1
         depth_history_action_mask[pl][depth].append(actions_mask[pl])
       chance_probabilities = [0.0 for _ in range(distinct_actions)]
       if state.is_chance_node():
@@ -213,18 +223,20 @@ class SimultaneousJaxCFR:
         depth_history_previous_action[pl][depth].append(
             previous_info.actions[pl]
         )
-        if state.current_player() == SPIEL_SIMULTANEOUS_PLAYER:
+        if state.current_player() == SPIEL_SIMULTANEOUS_PLAYER or (state.current_player() in [0, 1]):
           iset = state.information_state_string(pl)
           isets.append(iset)
           if iset not in pl_isets[pl]:
-            pl_isets[pl][iset] = ids[pl]
+            #also need to add info if the iset
+            # is artificial now for correct policy reconstruction
+            pl_isets[pl][iset] = (ids[pl], (use_mock_action) and (pl != state.current_player()))
             ids[pl] += 1
             iset_previous_action[pl].append(previous_info.actions[pl])
             iset_action_mask[pl].append(actions_mask[pl])
             iset_action_depth[pl].append(previous_info.prev_actions[pl])
-          depth_history_iset[pl][depth].append(pl_isets[pl][iset])
+          depth_history_iset[pl][depth].append(pl_isets[pl][iset][0])
           depth_history_actions[pl][depth].append([
-              i + pl_isets[pl][iset] * distinct_actions
+              i + pl_isets[pl][iset][0] * distinct_actions
               for i in range(distinct_actions)
           ])
         else:
@@ -237,17 +249,22 @@ class SimultaneousJaxCFR:
         #TODO Handle chance nodes here. For now the assumption is no chance nodes.
         pass
       else:
-        for a1 in state.legal_actions(0):
-          for a2 in state.legal_actions(1):
+        state_actions = [[] for _ in range(players)]
+        for player in range(players):
+            state_actions[player] = state.legal_actions(player) if player == state.current_player() else mock_actions + state.legal_actions(player)
+        if state.current_player() == SPIEL_TERMINAL_PLAYER or len(state_actions[state.current_player()]) == 0:
+          return
+        for a1 in state_actions[0]:
+          for a2 in state_actions[1]:
             #new_chance = chance * chance_probabilities[a]
             #assert new_chance > 0.0
             joint_action = [a1, a2]
             new_actions = tuple(
-                pl_isets[pl][isets[pl]] * distinct_actions + joint_action[pl]
+                pl_isets[pl][isets[pl]][0] * distinct_actions + joint_action[pl] + int(use_mock_action)
                 for pl in range(players)
             )
             new_infosets = tuple(
-                pl_isets[pl][isets[pl]]
+                pl_isets[pl][isets[pl]][0]
                 for pl in range(players)
             )
             new_prev_actions = tuple(
@@ -262,15 +279,17 @@ class SimultaneousJaxCFR:
                 state.current_player(),
             )
             new_state = state.clone()
-            new_state.apply_actions(joint_action)
+            if use_mock_action:
+                new_state.apply_action(joint_action[state.current_player()])
+            else:
+              new_state.apply_actions(joint_action)
 
             # simple workaround if the next element was not visited yet
-            next_history_temp[a1, a2] = (
+            next_history_temp[a1 + int(use_mock_action), a2 + int(use_mock_action)] = (
                 len(depth_history_player[depth + 1])
                 if len(depth_history_player) > depth + 1
                 else 0
             )
-
             _traverse_tree(new_state, new_info, depth + 1, chance)
 
     s = self.game.new_initial_state()
@@ -354,6 +373,7 @@ class SimultaneousJaxCFR:
       self.update_regrets = jax.vmap(update_regrets, 0, 0)
 
     self.iset_map = pl_isets
+    self.use_mock_action = use_mock_action
 
   def multiple_steps(self, iterations: int):
     """Performs several CFR steps.
@@ -458,7 +478,6 @@ class SimultaneousJaxCFR:
         [self.constants.depth_history_utility[pl][-1]]
         for pl in range(self.constants.players)
     ]
-    #print(np.asarray(depth_utils).shape)
     for i in range(self.constants.max_depth - 2, -1, -1):
 
       #TODO Handle chance here 
@@ -478,7 +497,7 @@ class SimultaneousJaxCFR:
           utility_matrix = jnp.transpose(utility_matrix, (0, 2, 1))
         #weight the rows by the opponent current policy and sum them to get action value
         action_value = jnp.where(
-            self.constants.depth_history_player[i][..., jnp.newaxis] == -4,
+            self.constants.depth_history_player[i][..., jnp.newaxis] == SPIEL_TERMINAL_PLAYER,
             self.constants.depth_history_utility[pl][i][..., jnp.newaxis],
             jnp.sum(utility_matrix * current_strategies[opp][self.constants.depth_history_iset[opp][i]][..., jnp.newaxis], axis = 1),
         )
@@ -486,7 +505,7 @@ class SimultaneousJaxCFR:
         regret = (
             (action_value - history_value[..., jnp.newaxis])
             * self.constants.depth_history_action_mask[pl][i]
-            * (self.constants.depth_history_player[i][..., jnp.newaxis] == SPIEL_SIMULTANEOUS_PLAYER)
+            * (jnp.logical_or(self.constants.depth_history_player[i][..., jnp.newaxis] == SPIEL_SIMULTANEOUS_PLAYER, self.constants.depth_history_player[i][..., jnp.newaxis] == pl))
             * self.constants.depth_history_chance[i][..., jnp.newaxis]
         )
         for pl2 in range(self.constants.players):
@@ -534,6 +553,9 @@ class SimultaneousJaxCFR:
         np.asarray(self.averages[pl]) for pl in range(self.constants.players)
     ]
     averages = [
+      np.where(averages[pl] >= 0, averages[pl], np.zeros_like(averages[pl])) for pl in range(self.constants.players)
+    ]
+    averages = [
         averages[pl] / np.sum(averages[pl], -1, keepdims=True)
         for pl in range(self.constants.players)
     ]
@@ -542,10 +564,12 @@ class SimultaneousJaxCFR:
 
     for pl in range(2):
       for iset, val in self.iset_map[pl].items():
-        if not iset:
+        #filter out artificially created infosets in sequential games
+        idx, artificial = val
+        if not iset or artificial:
           continue
         state_policy = avg_strategy.policy_for_key(iset)
         for i in range(len(state_policy)):
-          state_policy[i] = averages[pl][val][i]
+          state_policy[i] = averages[pl][idx][i + int(self.use_mock_action)]
     return avg_strategy
 
