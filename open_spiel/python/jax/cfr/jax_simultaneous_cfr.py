@@ -36,38 +36,12 @@ import jax.numpy as jnp
 import numpy as np
 
 from open_spiel.python import policy
+from jax.experimental.host_callback import id_print
+from open_spiel.python.jax.cfr.jax_cfr import regret_matching, update_regrets, update_regrets_plus
 import pyspiel
 
 JAX_CFR_SIMULTANEOUS_UPDATE = -5
-SPIEL_SIMULTANEOUS_PLAYER = -2
-SPIEL_TERMINAL_PLAYER = -4
-SPIEL_INVALID_ACTION = -1
 
-
-def regret_matching(regret, mask):
-  """Computes current policy based on current regrets.
-
-  Args:
-    regret: Current regrets in array Fkiat[Isets, Actions]
-    mask: Legal action mask Bool[Isets, Actions]
-
-  Returns:
-    policy: the policy.
-  """
-  regret = jnp.maximum(regret, 0) * mask
-  total = jnp.sum(regret, axis=-1, keepdims=True)
-
-  return jnp.where(total > 0.0, regret / total, 1.0 / jnp.sum(mask)) * mask
-
-
-def update_regrets_plus(regret):
-  """Clamps the regrets to be non-negative."""
-  return regret * (regret > 0)
-
-
-def update_regrets(regret):
-  """Updates the regrets without CFRPlus."""
-  return regret
 
 
 @chex.dataclass(frozen=True)
@@ -134,7 +108,7 @@ class SimultaneousJaxCFR:
     dynamics = game_type.dynamics
     # for sequenital games create a fake action so that the algorithm will work
     use_mock_action = dynamics == game_type.Dynamics.SEQUENTIAL
-    mock_actions = [SPIEL_INVALID_ACTION] if use_mock_action else [] 
+    mock_actions = [pyspiel.INVALID_ACTION] if use_mock_action else [] 
     depth_history_utility = [[] for _ in range(players)]
     depth_history_previous_iset = [[] for _ in range(players)]
     depth_history_previous_action = [[] for _ in range(players)]
@@ -223,7 +197,7 @@ class SimultaneousJaxCFR:
         depth_history_previous_action[pl][depth].append(
             previous_info.actions[pl]
         )
-        if state.current_player() == SPIEL_SIMULTANEOUS_PLAYER or (state.current_player() in [0, 1]):
+        if state.current_player() == pyspiel.PlayerId.SIMULTANEOUS.value or (state.current_player() in [0, 1]):
           iset = state.information_state_string(pl)
           isets.append(iset)
           if iset not in pl_isets[pl]:
@@ -252,7 +226,7 @@ class SimultaneousJaxCFR:
         state_actions = [[] for _ in range(players)]
         for player in range(players):
             state_actions[player] = state.legal_actions(player) if player == state.current_player() else mock_actions + state.legal_actions(player)
-        if state.current_player() == SPIEL_TERMINAL_PLAYER or len(state_actions[state.current_player()]) == 0:
+        if state.current_player() == pyspiel.PlayerId.TERMINAL.value or len(state_actions[state.current_player()]) == 0:
           return
         for a1 in state_actions[0]:
           for a2 in state_actions[1]:
@@ -497,7 +471,7 @@ class SimultaneousJaxCFR:
           utility_matrix = jnp.transpose(utility_matrix, (0, 2, 1))
         #weight the rows by the opponent current policy and sum them to get action value
         action_value = jnp.where(
-            self.constants.depth_history_player[i][..., jnp.newaxis] == SPIEL_TERMINAL_PLAYER,
+            self.constants.depth_history_player[i][..., jnp.newaxis] == pyspiel.PlayerId.TERMINAL.value,
             self.constants.depth_history_utility[pl][i][..., jnp.newaxis],
             jnp.sum(utility_matrix * current_strategies[opp][self.constants.depth_history_iset[opp][i]][..., jnp.newaxis], axis = 1),
         )
@@ -505,7 +479,7 @@ class SimultaneousJaxCFR:
         regret = (
             (action_value - history_value[..., jnp.newaxis])
             * self.constants.depth_history_action_mask[pl][i]
-            * (jnp.logical_or(self.constants.depth_history_player[i][..., jnp.newaxis] == SPIEL_SIMULTANEOUS_PLAYER, self.constants.depth_history_player[i][..., jnp.newaxis] == pl))
+            * (jnp.logical_or(self.constants.depth_history_player[i][..., jnp.newaxis] == pyspiel.PlayerId.SIMULTANEOUS.value, self.constants.depth_history_player[i][..., jnp.newaxis] == pl))
             * self.constants.depth_history_chance[i][..., jnp.newaxis]
         )
         for pl2 in range(self.constants.players):
