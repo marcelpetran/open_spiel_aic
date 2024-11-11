@@ -102,9 +102,25 @@ class DarkChessState : public State {
     return moves_history_;
   }
 
-  std::array<int, 64> LastSeenPiece(chess::Color color, chess::PieceType piece_type) const {
+  std::vector<int> LastSeenPiece(chess::Color color, chess::PieceType piece_type) const {
     return last_seen_[chess::ToInt(color)][(int) piece_type - 1];
   }
+
+  int TotalPieces() const { return total_pieces_; }
+
+  void AddPiece() { total_pieces_++; }
+
+  int Pawns() const { return pawns; }
+  int Rooks() const { return rooks; }
+  int Knights() const { return knights; }
+  int Bishops() const { return bishops; }
+  int Queens() const { return queens; }
+
+  void AddPawn() { pawns++; }
+  void AddRook() { rooks++; }
+  void AddKnight() { knights++; }
+  void AddBishop() { bishops++; }
+  void AddQueen() { queens++; }
 
  protected:
   void DoApplyAction(Action action) override;
@@ -135,8 +151,14 @@ class DarkChessState : public State {
 
   // TODO(kubicon) This is specific for 8x8 chess and is here only for now.
   // For each color, each piece it stores the time when it was saw the last time at given position by opponent
-  std::array<std::array<std::array<int, 64>, 6>, 2> last_seen_;
+  std::vector<std::vector<std::vector<int>>> last_seen_;
 
+  int total_pieces_ = 0;
+  int pawns = 0;
+  int rooks = 0;
+  int knights = 0;
+  int bishops = 0;
+  int queens = 0;
   // RepetitionTable records how many times the given hash exists in the history
   // stack (including the current board).
   // We are already indexing by board hash, so there is no need to hash that
@@ -160,8 +182,40 @@ class DarkChessGame : public Game {
     return chess::NumDistinctActions();
   }
   std::unique_ptr<State> NewInitialState() const override {
-    return absl::make_unique<DarkChessState>(shared_from_this(), board_size_,
+    // set total_pieces_ to the number of pieces on the board
+    auto state = absl::make_unique<DarkChessState>(shared_from_this(), board_size_,
                                              fen_);
+    for (int y = 0; y < board_size_; ++y) {
+      for (int x = 0; x < board_size_; ++x) {
+        chess::Square sq{x, y};
+        chess::Piece piece = state->Board().at(sq);
+        if (piece.color != chess::Color::kEmpty) {
+          state->AddPiece();
+          switch (piece.type) {
+            case chess::PieceType::kPawn:
+              state->AddPawn();
+              break;
+            case chess::PieceType::kRook:
+              state->AddRook();
+              break;
+            case chess::PieceType::kKnight:
+              state->AddKnight();
+              break;
+            case chess::PieceType::kBishop:
+              state->AddBishop();
+              break;
+            case chess::PieceType::kQueen:
+              state->AddQueen();
+              break;
+            case chess::PieceType::kKing:
+              break;
+            default:
+              SpielFatalError("Unknown piece type");
+          }
+        }
+      }
+    }
+    return state;
   }
   int NumPlayers() const override { return chess::NumPlayers(); }
   double MinUtility() const override { return LossUtility(); }
@@ -171,8 +225,8 @@ class DarkChessGame : public Game {
 
     return {
       chess::kMaxBoardSize, chess::kMaxBoardSize,
-      6 + // Player pieces
-      6 + // Opponent pieces
+      6 + // Player piece types
+      6 + // Opponent piece types
       1 + // Empty tile
       1 + // Unknown tile
       1 // 3 public: repetitions count in one-hot encoding, 2 public: side to play, 1 public: irreversible move counter -- a fraction of $n over 100, 4 private: left/right castling rights, one-hot encoded. In the dark chess original this require only 10 tiles, so we will have some overhead
@@ -193,8 +247,8 @@ class DarkChessGame : public Game {
   std::vector<int> StateTensorShape() const override { 
     return {
       chess::kMaxBoardSize, chess::kMaxBoardSize,
-      6 + // Player pieces
-      6 + // Opponent pieces
+      6 + // Player piece types
+      6 + // Opponent piece types
       1 + // Empty tile
       // 1 + // Unknown tile not necessary in state tensor
       1 // 3 public: repetitions count in one-hot encoding, 2 public: side to play, 1 public: irreversible move counter -- a fraction of $n over 100, 4 private: left/right castling rights, one-hot encoded. In the dark chess original this require only 10 tiles, so we will have some overhead

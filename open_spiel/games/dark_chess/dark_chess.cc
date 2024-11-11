@@ -380,13 +380,13 @@ class DarkChessObserver : public Observer {
     }
   }
 
-  void WriteLastSeenPieces(chess::Color color, chess::PieceType piece_type,
-    const std::array<int, 64> last_seen_piece,
+  void WriteLastSeenPieces(const chess::ChessBoard& board, chess::Color color, chess::PieceType piece_type,
+    const std::vector<int> last_seen_piece,
     const std::string& prefix, Allocator* allocator) const  {
     const std::string type_string =  chess::PieceTypeToString(
                   piece_type,
                   /*uppercase=*/color == chess::Color::kWhite);
-    const int board_size = 8;
+    const int board_size = board.BoardSize();
     const int max_memory = 40;
     auto out = allocator->Get(prefix + "_" + type_string + "_last_seen_pieces",
                               {board_size, board_size});
@@ -428,10 +428,10 @@ class DarkChessObserver : public Observer {
     out.at(val - min) = 1;
   }
 
-  void WritePiecesAlive(int val, int max, int offset, SpanTensor& tensor) const {
+  void WritePiecesAlive(int val, int max, int offset, SpanTensor& tensor, int board_size) const {
     // SPIEL_DCHECK_LE(val, max);
     for (int i = 0; i < max; i++) {
-      val > i ? tensor.at(i + offset + 8) = 1.0f : tensor.at(i + offset) = 1.0f;
+      val > i ? tensor.at(i + offset + board_size) = 1.0f : tensor.at(i + offset) = 1.0f;
     }
   }
 
@@ -457,10 +457,10 @@ class DarkChessObserver : public Observer {
       if (color == chess::Color::kWhite) {
         WritePieces(chess::Color::kWhite, piece_type, state.Board(),
                           private_info_table, prefix, allocator);
-        WriteLastSeenPieces(chess::Color::kBlack, piece_type, state.LastSeenPiece(chess::Color::kBlack, piece_type), prefix, allocator);
+        WriteLastSeenPieces(state.Board(), chess::Color::kBlack, piece_type, state.LastSeenPiece(chess::Color::kBlack, piece_type), prefix, allocator);
       }
       else {
-        WriteLastSeenPieces(chess::Color::kWhite, piece_type, state.LastSeenPiece(chess::Color::kWhite, piece_type), prefix, allocator);
+        WriteLastSeenPieces(state.Board(), chess::Color::kWhite, piece_type, state.LastSeenPiece(chess::Color::kWhite, piece_type), prefix, allocator);
         WritePieces(chess::Color::kBlack, piece_type, state.Board(),
                   private_info_table, prefix, allocator);
       }
@@ -483,19 +483,28 @@ class DarkChessObserver : public Observer {
       }
     }
     SPIEL_CHECK_EQ(pieces_on_board[0], 1); // King has to be there!
+    auto out = allocator->Get("Remaining pieces", {state.TotalPieces()}); // Each of the pieces is either there or not.
+    int queens = state.Queens()/2;
+    int bishops = state.Bishops()/2;
+    int knights = state.Knights()/2;
+    int rooks = state.Rooks()/2;
+    int pawns = state.Pawns()/2;
 
-    auto out = allocator->Get("Remaining pieces", {32}); // Each of the pieces is either there or not.
-
+    int offset = 0;
     // 1 king, 1 queen, 2 rooks, 2 bishops, 2 knights, 8 pawns
-    WritePiecesAlive(pieces_on_board[0], 1, 0, out);
-    WritePiecesAlive(pieces_on_board[1], 1, 1, out);
-    WritePiecesAlive(pieces_on_board[2], 2, 2, out);
-    WritePiecesAlive(pieces_on_board[3], 2, 4, out);
-    WritePiecesAlive(pieces_on_board[4], 2, 6, out);
-    WritePiecesAlive(pieces_on_board[5], 8, 16, out); 
+    WritePiecesAlive(pieces_on_board[0], 1, offset, out, state.BoardSize());
+    WritePiecesAlive(pieces_on_board[1], queens, ++offset, out, state.BoardSize());
+    offset += queens;
+    WritePiecesAlive(pieces_on_board[2], rooks, offset, out, state.BoardSize());
+    offset += rooks;
+    WritePiecesAlive(pieces_on_board[3], bishops, offset, out, state.BoardSize());
+    offset += bishops;
+    WritePiecesAlive(pieces_on_board[4], knights, offset, out, state.BoardSize());
+    offset += knights;
+    WritePiecesAlive(pieces_on_board[5], pawns, offset, out, state.BoardSize()); // 16?? for 8x8 board
 
     // Just to fill out the space
-    out = allocator->Get("fill", {8});
+    out = allocator->Get("fill", {state.BoardSize()}); // ?? why fill, understand 32 - 24 = 8, but for other sizes?
 
     // TODO(kubicon) This is changed to correspond to the state tensor representation
     // Num repetitions for the current board in one-hot.
@@ -556,26 +565,24 @@ DarkChessState::DarkChessState(std::shared_ptr<const Game> game, int board_size,
       start_board_(*chess::ChessBoard::BoardFromFEN(fen, board_size, true)),
       current_board_(start_board_) {
   SPIEL_CHECK_TRUE(&current_board_);
-  SPIEL_CHECK_EQ(8, board_size);
+
+  // TODO(petram): redo for different board sizes
+  // SPIEL_CHECK_EQ(8, board_size);
   repetitions_[current_board_.HashValue()] = 1;
-  last_seen_ = std::array<std::array<std::array<int, 64>, 6>, 2>();
-  for (int i = 0; i < 2; ++i) {
-    for (int j = 0; j < 6; ++j) {
-      for (int k = 0; k < 64; ++k) {
-        last_seen_[i][j][k] = -1;
-      }
-    }
-  }
+  int board_area = board_size * board_size;
+  // last_seen_ = std::array<std::array<std::array<int, 64>, 6>, 2>();
+  last_seen_ = std::vector<std::vector<std::vector<int>>>(
+      2, std::vector<std::vector<int>>(6, std::vector<int>(board_area, -1)));
 
   // TODO(kubicon) Move this to a separate function for DRY.
-  for (int8_t y = 0; y < 8; ++y) {
-    for (int8_t x = 0; x < 8; ++x) {
+  for (int8_t y = 0; y < board_size; ++y) {
+    for (int8_t x = 0; x < board_size; ++x) {
       chess::Square sq{x, y};
       chess::Piece piece = current_board_.at(sq);
       if (piece.color != chess::Color::kEmpty) {
         int piece_type = (int) piece.type;
         SPIEL_CHECK_GT(piece_type, 0); // Piece cannot be empty
-        last_seen_[ToInt(piece.color)][piece_type - 1][chess::SquareToIndex(sq, 8)] = 0;
+        last_seen_[ToInt(piece.color)][piece_type - 1][chess::SquareToIndex(sq, board_size)] = 0;
       }
     }
   }
@@ -591,9 +598,10 @@ void DarkChessState::DoApplyAction(Action action) {
   const auto public_info_table = ComputePublicInfoTable(Board());
 
   // We update the last seen by saying that each previously seen piece is moved 1 turn forward
+  size_t board_area = BoardSize() * BoardSize();
   for (int i = 0; i < 2; ++i) {
     for (int j = 0; j < 6; ++j) {
-      for (int k = 0; k < 64; ++k) {
+      for (int k = 0; k < board_area; ++k) {
         if (last_seen_[i][j][k] != -1) {
           last_seen_[i][j][k]++;
         }
@@ -840,9 +848,9 @@ absl::optional<std::vector<double>> DarkChessState::MaybeFinalReturns() const {
 }
 
 DarkChessGame::DarkChessGame(const GameParameters& params)
-    : Game(kGameType, params),
-      board_size_(ParameterValue<int>("board_size")),
-      fen_(ParameterValue<std::string>("fen", chess::DefaultFen(board_size_))) {
+  : Game(kGameType, params),
+    board_size_(ParameterValue<int>("board_size")),
+    fen_(params.count("fen") ? params.at("fen").string_value() : chess::DefaultFen(board_size_)) {
   default_observer_ = std::make_shared<DarkChessObserver>(kDefaultObsType);
 }
 
