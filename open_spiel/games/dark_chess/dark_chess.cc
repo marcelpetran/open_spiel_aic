@@ -203,7 +203,10 @@ bool IsUnderAttack(const chess::Square defender_sq,
 // other.
 chess::ObservationTable ComputePublicInfoTable(const chess::ChessBoard& board) {
   const int board_size = board.BoardSize();
-  std::array<bool, chess::k2dMaxBoardSize> observability_table{false};
+  const int board_area = board_size * board_size;
+  // std::array<bool, chess::k2dMaxBoardSize> observability_table{false};
+  // std::vector<bool> observability_table(board_area, false);
+  std::vector<bool> observability_table(board_area, false);
   board.GenerateLegalMoves(
       [&](const chess::Move& move) -> bool {
         const chess::Piece& from_piece = board.at(move.from);
@@ -263,8 +266,8 @@ bool ObserverHasTensor(IIGObservationType iig_obs_type) {
 void AddPieceTypePlane(chess::Color color, chess::PieceType piece_type,
                        const chess::ChessBoard& board,
                        absl::Span<float>::iterator& value_it) {
-  for (int8_t y = 0; y < chess::kMaxBoardSize; ++y) {
-    for (int8_t x = 0; x < chess::kMaxBoardSize; ++x) {
+  for (int8_t y = 0; y < board.BoardSize(); ++y) {
+    for (int8_t x = 0; x < board.BoardSize(); ++x) {
       chess::Piece piece_on_board = board.at(chess::Square{x, y});
       *value_it++ =
           (piece_on_board.color == color && piece_on_board.type == piece_type
@@ -277,14 +280,16 @@ void AddPieceTypePlane(chess::Color color, chess::PieceType piece_type,
 // Adds a uniform scalar plane scaled with min and max.
 template <typename T>
 void AddScalarPlane(T val, T min, T max,
-                    absl::Span<float>::iterator& value_it) {
+                    absl::Span<float>::iterator& value_it, const int board_area) {
   double normalized_val = static_cast<double>(val - min) / (max - min);
-  for (int i = 0; i < chess::k2dMaxBoardSize; ++i) *value_it++ = normalized_val;
+  // for (int i = 0; i < chess::k2dMaxBoardSize; ++i) *value_it++ = normalized_val;
+  
+  for (int i = 0; i < board_area; ++i) *value_it++ = normalized_val;
 }
 
 // Adds a binary scalar plane.
-void AddBinaryPlane(bool val, absl::Span<float>::iterator& value_it) {
-  AddScalarPlane<int>(val ? 1 : 0, 0, 1, value_it);
+void AddBinaryPlane(bool val, absl::Span<float>::iterator& value_it, const int board_area) {
+  AddScalarPlane<int>(val ? 1 : 0, 0, 1, value_it, board_area);
 }
 
 }  // namespace
@@ -428,10 +433,9 @@ class DarkChessObserver : public Observer {
     out.at(val - min) = 1;
   }
 
-  void WritePiecesAlive(int val, int max, int offset, SpanTensor& tensor, int board_size) const {
-    // SPIEL_DCHECK_LE(val, max);
+  void WritePiecesAlive(int val, int max, int offset, SpanTensor& tensor) const {
     for (int i = 0; i < max; i++) {
-      val > i ? tensor.at(i + offset + board_size) = 1.0f : tensor.at(i + offset) = 1.0f;
+      tensor.at(i + offset) = (val > i) ? 1.0f : 0.0f;
     }
   }
 
@@ -442,88 +446,36 @@ class DarkChessObserver : public Observer {
   }
 
   void WritePrivateInfoTensor(const DarkChessState& state,
-                              const chess::ObservationTable& public_info_table,
-                              int player, const std::string& prefix,
-                              Allocator* allocator) const {
-    const auto entry = state.repetitions_.find(state.Board().HashValue());
-    SPIEL_CHECK_FALSE(entry == state.repetitions_.end());
-    int repetitions = entry->second;
-    chess::Color color = chess::PlayerToColor(player);
-    chess::ObservationTable private_info_table =
-        ComputePrivateInfoTable(state.Board(), color, public_info_table);
+                            const chess::ObservationTable& public_info_table,
+                            int player, const std::string& prefix,
+                            Allocator* allocator) const {
+  chess::Color color = chess::PlayerToColor(player);
+  chess::ObservationTable private_info_table =
+      ComputePrivateInfoTable(state.Board(), color, public_info_table);
 
-    // Piece configuration.
-    for (const chess::PieceType& piece_type : chess::kPieceTypes) {
-      if (color == chess::Color::kWhite) {
-        WritePieces(chess::Color::kWhite, piece_type, state.Board(),
-                          private_info_table, prefix, allocator);
-        WriteLastSeenPieces(state.Board(), chess::Color::kBlack, piece_type, state.LastSeenPiece(chess::Color::kBlack, piece_type), prefix, allocator);
-      }
-      else {
-        WriteLastSeenPieces(state.Board(), chess::Color::kWhite, piece_type, state.LastSeenPiece(chess::Color::kWhite, piece_type), prefix, allocator);
-        WritePieces(chess::Color::kBlack, piece_type, state.Board(),
-                  private_info_table, prefix, allocator);
-      }
-    }
-    WritePieces(chess::Color::kEmpty, chess::PieceType::kEmpty, state.Board(),
+  // Piece configuration.
+  for (const chess::PieceType& piece_type : chess::kPieceTypes) {
+    WritePieces(color, piece_type, state.Board(),
                 private_info_table, prefix, allocator);
-    WriteUnknownSquares(state.Board(), private_info_table, prefix, allocator);
-
-    // TODO(kubicon) We do not need the king, because if it is not there, you have Already won. But just to have consistent representation.
-    std::array<int, 6> pieces_on_board = {0};
-
-    for (int8_t y = 0; y < state.BoardSize(); ++y) {
-      for (int8_t x = 0; x < state.BoardSize(); ++x) {
-        const chess::Square square{x, y};
-        const chess::Piece& piece_on_board = state.Board().at(square);
-        int piece_type = (int) piece_on_board.type;
-        if (piece_on_board.color != color && piece_on_board.type > chess::PieceType::kEmpty) {
-          pieces_on_board[piece_type - 1]++; // We do not care about empty tiles
-        }
-      }
-    }
-    SPIEL_CHECK_EQ(pieces_on_board[0], 1); // King has to be there!
-    auto out = allocator->Get("Remaining pieces", {state.TotalPieces()}); // Each of the pieces is either there or not.
-    int queens = state.Queens()/2;
-    int bishops = state.Bishops()/2;
-    int knights = state.Knights()/2;
-    int rooks = state.Rooks()/2;
-    int pawns = state.Pawns()/2;
-
-    int offset = 0;
-    // 1 king, 1 queen, 2 rooks, 2 bishops, 2 knights, 8 pawns
-    WritePiecesAlive(pieces_on_board[0], 1, offset, out, state.BoardSize());
-    WritePiecesAlive(pieces_on_board[1], queens, ++offset, out, state.BoardSize());
-    offset += queens;
-    WritePiecesAlive(pieces_on_board[2], rooks, offset, out, state.BoardSize());
-    offset += rooks;
-    WritePiecesAlive(pieces_on_board[3], bishops, offset, out, state.BoardSize());
-    offset += bishops;
-    WritePiecesAlive(pieces_on_board[4], knights, offset, out, state.BoardSize());
-    offset += knights;
-    WritePiecesAlive(pieces_on_board[5], pawns, offset, out, state.BoardSize()); // 16?? for 8x8 board
-
-    // Just to fill out the space
-    out = allocator->Get("fill", {state.BoardSize()}); // ?? why fill, understand 32 - 24 = 8, but for other sizes?
-
-    // TODO(kubicon) This is changed to correspond to the state tensor representation
-    // Num repetitions for the current board in one-hot.
-    WriteScalar(/*val=*/repetitions, /*min=*/1, /*max=*/6, "repetitions",
-                allocator);
-
-    // Side to play.
-    WriteScalar(/*val=*/ColorToPlayer(state.Board().ToPlay()),
-                /*min=*/0, /*max=*/1, "side_to_play", allocator);
-  
-    int color_offset = 6 * chess::ToInt(color);
-    // Castling rights.
-    WriteScalar(
-        state.Board().CastlingRight(color, chess::CastlingDirection::kLeft) + color_offset, 0, 7,
-        prefix + "_left_castling", allocator);
-    WriteScalar(
-        state.Board().CastlingRight(color, chess::CastlingDirection::kRight) + color_offset, 0, 7,
-        prefix + "_right_castling", allocator);
+    WritePieces(chess::OppColor(color), piece_type, state.Board(),
+                private_info_table, prefix, allocator);
   }
+  WritePieces(chess::Color::kEmpty, chess::PieceType::kEmpty, state.Board(),
+              private_info_table, prefix, allocator);
+  WriteUnknownSquares(state.Board(), private_info_table, prefix, allocator);
+
+  // Side to play.
+  WriteScalar(/*val=*/ColorToPlayer(state.Board().ToPlay()),
+              /*min=*/0, /*max=*/1, "side_to_play", allocator);
+
+  // Castling rights.
+  WriteScalar(
+      state.Board().CastlingRight(color, chess::CastlingDirection::kLeft), 0, 1,
+      prefix + "_left_castling", allocator);
+  WriteScalar(
+      state.Board().CastlingRight(color, chess::CastlingDirection::kRight), 0, 1,
+      prefix + "_right_castling", allocator);
+}
 
   void WritePublicInfoTensor(const DarkChessState& state,
                              const chess::ObservationTable& public_info_table,
@@ -615,10 +567,10 @@ void DarkChessState::DoApplyAction(Action action) {
     chess::ObservationTable private_info_table =
         ComputePrivateInfoTable(Board(), color, public_info_table);
     // If we still see a piece we update it 
-    for (int y = 0; y < chess::kMaxBoardSize; ++y) {
-      for (int x = 0; x < chess::kMaxBoardSize; ++x) {
+    for (int y = 0; y < BoardSize(); ++y) {
+      for (int x = 0; x < BoardSize(); ++x) {
         chess::Square sq{x, y};
-        int board_index = chess::SquareToIndex(sq, 8);
+        int board_index = chess::SquareToIndex(sq, BoardSize());
         if (!(public_info_table[board_index] || private_info_table[board_index])) {
           continue;
         }
@@ -704,49 +656,93 @@ void DarkChessState::StateTensor(absl::Span<float> values) const {
   int black_left_castle = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft);
   int black_right_castle = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight);
 
-  // Num repetitions of the current board
-  for (int j = 0; j < 3; ++j){
-    for (int i = 0; i < 3; ++i) {
-      *value_it++ = (repetitions == i + 1) ? 1 : 0;
-    }
+  int bit_limit = BoardSize() * BoardSize();
+  int repetition_limit = (BoardSize() >= 6) ? 3 : 2;
+  int player_limit = (BoardSize() >= 6) ? 2 : 1;
+  int padding_bits = (BoardSize() / 2);
+  int castle_padding = (BoardSize() >= 6) ? 4 : 2;
 
-    for (int i = 0; i < 3; ++i) {
-      *value_it++ = 0;
-    } 
+  // Repetitions
+  for (int j = 0; j < repetition_limit; ++j) {
+      for (int i = 0; i < repetition_limit; ++i) {
+          *value_it++ = (repetitions == i + 1) ? 1 : 0;
+      }
+  }
 
-
-    for (int i = 0; i < 2; ++i) {
+  // Player to Play
+  for (int i = 0; i < player_limit * 2; ++i) {
       *value_it++ = (player_to_play == i) ? 1 : 0;
-    }
-  }
-  for (int i = 0; i < 8; ++i) {
-    *value_it++ = 0;
   }
 
-  for (int j = 0; j < 2; ++j) {
-    for (int i = 0; i < 2; ++i) {
-      *value_it++ = (white_left_castle == i) ? 1 : 0;
-    }
+  // Padding
+  for (int i = 0; i < padding_bits; ++i) {
+      *value_it++ = 0;
+  }
+
+  // Castle Rights (adjusted based on board size)
+  for (int j = 0; j < player_limit * 2; ++j) {
+      for (int i = 0; i < player_limit; ++i) {
+          *value_it++ = (white_left_castle == i) ? 1 : 0;
+          *value_it++ = (black_left_castle == i) ? 1 : 0;
+          *value_it++ = (white_right_castle == i) ? 1 : 0;
+          *value_it++ = (black_right_castle == i) ? 1 : 0;
+      }
+  }
+
+  // Final Padding to Complete Bit Limit
+  for (int i = 0; i < (bit_limit - (repetition_limit * repetition_limit + player_limit * 2 + padding_bits + player_limit * 8)); ++i) {
+      *value_it++ = 0;
+  }
+  // for (int j = 0; j < 3; ++j){
+  //   for (int i = 0; i < 3; ++i) {
+  //     *value_it++ = (repetitions == i + 1) ? 1 : 0;
+  //   }
+
+  //   for (int i = 0; i < 3; ++i) {
+  //     *value_it++ = 0;
+  //   } 
+
+
+  //   for (int i = 0; i < 2; ++i) {
+  //     *value_it++ = (player_to_play == i) ? 1 : 0;
+  //   }
+  // } // 3x(3 + 3 + 2) = 24
   
-    for (int i = 0; i < 4; ++i) {
-      *value_it++ = 0;
-    }
- 
-    for (int i = 0; i < 2; ++i) {
-      *value_it++ = (black_left_castle == i) ? 1 : 0;
-    }
-    for (int i = 0; i < 2; ++i) {
-      *value_it++ = (white_right_castle == i) ? 1 : 0;
-    }
-    
-    for (int i = 0; i < 4; ++i) {
-      *value_it++ = 0;
-    }
+  // for (int i = 0; i < BoardSize(); ++i) {
+  //   *value_it++ = 0;
+  // }
+  // const int padding = BoardSize() / 2;
+  // for (int j = 0; j < 2; ++j) {
+  //   for (int i = 0; i < 2; ++i) {
+  //     *value_it++ = (white_left_castle == i) ? 1 : 0;
+  //   }
 
-    for (int i = 0; i < 2; ++i) {
-      *value_it++ = (black_right_castle == i) ? 1 : 0;
-    }
-  }
+  //   for (int i = 0; i < padding; ++i) {
+  //     *value_it++ = 0;
+  //   }
+ 
+  //   for (int i = 0; i < 2; ++i) {
+  //     *value_it++ = (black_left_castle == i) ? 1 : 0;
+  //   }
+  //   for (int i = 0; i < 2; ++i) {
+  //     *value_it++ = (white_right_castle == i) ? 1 : 0;
+  //   }
+    
+  //   for (int i = 0; i < padding; ++i) {
+  //     *value_it++ = 0;
+  //   }
+
+  //   for (int i = 0; i < 2; ++i) {
+  //     *value_it++ = (black_right_castle == i) ? 1 : 0;
+  //   }
+  // } // 2x(2 + 4 + 2 + 2 + 4 + 2) = 32
+
+  // 24 + 8 + 32 = 64
+
+  // for 4x4 board? we have only 16 bits
+  // for (int i = 0; i < 16; ++i) {
+  //   *value_it++ = 0;
+  // }
 
 
   // Num repetitions for the current board.

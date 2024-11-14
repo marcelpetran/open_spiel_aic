@@ -110,17 +110,17 @@ class DarkChessState : public State {
 
   void AddPiece() { total_pieces_++; }
 
-  int Pawns() const { return pawns; }
-  int Rooks() const { return rooks; }
-  int Knights() const { return knights; }
-  int Bishops() const { return bishops; }
-  int Queens() const { return queens; }
+  int Pawns(chess::Color color) const { return color == chess::Color::kWhite ? w_pawns : b_pawns; }
+  int Rooks(chess::Color color) const { return color == chess::Color::kWhite ? w_rooks : b_rooks; }
+  int Knights(chess::Color color) const { return color == chess::Color::kWhite ? w_knights : b_knights; }
+  int Bishops(chess::Color color) const { return color == chess::Color::kWhite ? w_bishops : b_bishops; }
+  int Queens(chess::Color color) const { return color == chess::Color::kWhite ? w_queens : b_queens; }
 
-  void AddPawn() { pawns++; }
-  void AddRook() { rooks++; }
-  void AddKnight() { knights++; }
-  void AddBishop() { bishops++; }
-  void AddQueen() { queens++; }
+  void AddRook(chess::Color color) { color == chess::Color::kWhite ? w_rooks++ : b_rooks++; }
+  void AddPawn(chess::Color color) { color == chess::Color::kWhite ? w_pawns++ : b_pawns++; }
+  void AddKnight(chess::Color color) { color == chess::Color::kWhite ? w_knights++ : b_knights++; }
+  void AddBishop(chess::Color color) { color == chess::Color::kWhite ? w_bishops++ : b_bishops++; }
+  void AddQueen(chess::Color color) { color == chess::Color::kWhite ? w_queens++ : b_queens++; }
 
  protected:
   void DoApplyAction(Action action) override;
@@ -154,11 +154,16 @@ class DarkChessState : public State {
   std::vector<std::vector<std::vector<int>>> last_seen_;
 
   int total_pieces_ = 0;
-  int pawns = 0;
-  int rooks = 0;
-  int knights = 0;
-  int bishops = 0;
-  int queens = 0;
+  int w_pawns = 0;
+  int w_rooks = 0;
+  int w_knights = 0;
+  int w_bishops = 0;
+  int w_queens = 0;
+  int b_pawns = 0;
+  int b_rooks = 0;
+  int b_knights = 0;
+  int b_bishops = 0;
+  int b_queens = 0;
   // RepetitionTable records how many times the given hash exists in the history
   // stack (including the current board).
   // We are already indexing by board hash, so there is no need to hash that
@@ -193,19 +198,19 @@ class DarkChessGame : public Game {
           state->AddPiece();
           switch (piece.type) {
             case chess::PieceType::kPawn:
-              state->AddPawn();
+              state->AddPawn(piece.color);
               break;
             case chess::PieceType::kRook:
-              state->AddRook();
+              state->AddRook(piece.color);
               break;
             case chess::PieceType::kKnight:
-              state->AddKnight();
+              state->AddKnight(piece.color);
               break;
             case chess::PieceType::kBishop:
-              state->AddBishop();
+              state->AddBishop(piece.color);
               break;
             case chess::PieceType::kQueen:
-              state->AddQueen();
+              state->AddQueen(piece.color);
               break;
             case chess::PieceType::kKing:
               break;
@@ -224,7 +229,7 @@ class DarkChessGame : public Game {
   std::vector<int> ObservationTensorShape() const override {
 
     return {
-      chess::kMaxBoardSize, chess::kMaxBoardSize,
+      board_size_, board_size_,
       6 + // Player piece types
       6 + // Opponent piece types
       1 + // Empty tile
@@ -246,7 +251,7 @@ class DarkChessGame : public Game {
 
   std::vector<int> StateTensorShape() const override { 
     return {
-      chess::kMaxBoardSize, chess::kMaxBoardSize,
+      board_size_, board_size_,
       6 + // Player piece types
       6 + // Opponent piece types
       1 + // Empty tile
