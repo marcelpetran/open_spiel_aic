@@ -434,7 +434,7 @@ class DarkChessObserver : public Observer {
 
   void WritePiecesAlive(int val, int max, SpanTensor& tensor) const {
     for (int i = 0; i < max; i++) {
-      tensor.at(i + offset) = (val > i) ? 1.0f : 0.0f;
+      tensor.at(i) = (val > i) ? 1.0f : 0.0f;
     }
   }
 
