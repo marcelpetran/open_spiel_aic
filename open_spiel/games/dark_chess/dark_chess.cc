@@ -469,12 +469,11 @@ class DarkChessObserver : public Observer {
   WriteUnknownSquares(state.Board(), private_info_table, prefix, allocator);
 
   // number of initial pieces
-  int queens = state.Queens(OppColor(color));
-  int rooks = state.Rooks(OppColor(color));
-  int bishops = state.Bishops(OppColor(color));
-  int knights = state.Knights(OppColor(color));
-  int pawns = state.Pawns(OppColor(color));
-
+  int queens, rooks, bishops, knights, pawns = 0;
+  int max_q = state.Queens(OppColor(color));
+  int max_r = state.Rooks(OppColor(color));
+  int max_b = state.Bishops(OppColor(color));
+  int max_n = state.Knights(OppColor(color));
   // Here write alive pieces
   for (int i = 0; i < state.Board().BoardSize(); i++) {
     for (int j = 0; j < state.Board().BoardSize(); j++) {
@@ -483,19 +482,27 @@ class DarkChessObserver : public Observer {
       if (piece.color == OppColor(color)) {
         switch (piece.type) {
           case chess::PieceType::kPawn:
-            pawns--;
+            pawns++;
             break;
           case chess::PieceType::kRook:
-            rooks--;
+            if ((++rooks) > max_r) {
+              max_r++;
+            }
             break;
           case chess::PieceType::kKnight:
-            knights--;
+            if ((++knights) > max_n) {
+              max_n++;
+            }
             break;
           case chess::PieceType::kBishop:
-            bishops--;
+            if ((++bishops) > max_b) {
+              max_b++;
+            }
             break;
           case chess::PieceType::kQueen:
-            queens--;
+            if ((++queens) > max_q) {
+              max_q++;
+            }
             break;
           default:
             break;
@@ -503,16 +510,16 @@ class DarkChessObserver : public Observer {
       }
     }
   }
-  auto out = allocator->Get(prefix + "_alive_pawns", {state.Pawns(color)});
-  WritePiecesAlive(pawns, state.Pawns(color), out);
-  out = allocator->Get(prefix + "_alive_rooks", {state.Rooks(color)});
-  WritePiecesAlive(rooks, state.Rooks(color), out);
-  out = allocator->Get(prefix + "_alive_knights", {state.Knights(color)});
-  WritePiecesAlive(knights, state.Knights(color), out);
-  out = allocator->Get(prefix + "_alive_bishops", {state.Bishops(color)});
-  WritePiecesAlive(bishops, state.Bishops(color), out);
-  out = allocator->Get(prefix + "_alive_queens", {state.Queens(color)});
-  WritePiecesAlive(queens, state.Queens(color), out);
+  auto out = allocator->Get(prefix + "_alive_pawns", {state.Pawns(OppColor(color))});
+  WritePiecesAlive(pawns, state.Pawns(OppColor(color)), out);
+  out = allocator->Get(prefix + "_alive_rooks", {max_r});
+  WritePiecesAlive(rooks, max_r, out);
+  out = allocator->Get(prefix + "_alive_knights", {max_n});
+  WritePiecesAlive(knights, max_n, out);
+  out = allocator->Get(prefix + "_alive_bishops", {max_b});
+  WritePiecesAlive(bishops, max_b, out);
+  out = allocator->Get(prefix + "_alive_queens", {max_q});
+  WritePiecesAlive(queens, max_q, out);
 
   // Side to play.
   WriteScalar(/*val=*/ColorToPlayer(state.Board().ToPlay()),
@@ -743,81 +750,6 @@ void DarkChessState::StateTensor(absl::Span<float> values) const {
   for (int i = 0; i < (bit_limit - (repetition_limit * repetition_limit + player_limit * 2 + padding_bits + player_limit * 8)); ++i) {
       *value_it++ = 0;
   }
-  // for (int j = 0; j < 3; ++j){
-  //   for (int i = 0; i < 3; ++i) {
-  //     *value_it++ = (repetitions == i + 1) ? 1 : 0;
-  //   }
-
-  //   for (int i = 0; i < 3; ++i) {
-  //     *value_it++ = 0;
-  //   } 
-
-
-  //   for (int i = 0; i < 2; ++i) {
-  //     *value_it++ = (player_to_play == i) ? 1 : 0;
-  //   }
-  // } // 3x(3 + 3 + 2) = 24
-  
-  // for (int i = 0; i < BoardSize(); ++i) {
-  //   *value_it++ = 0;
-  // }
-  // const int padding = BoardSize() / 2;
-  // for (int j = 0; j < 2; ++j) {
-  //   for (int i = 0; i < 2; ++i) {
-  //     *value_it++ = (white_left_castle == i) ? 1 : 0;
-  //   }
-
-  //   for (int i = 0; i < padding; ++i) {
-  //     *value_it++ = 0;
-  //   }
- 
-  //   for (int i = 0; i < 2; ++i) {
-  //     *value_it++ = (black_left_castle == i) ? 1 : 0;
-  //   }
-  //   for (int i = 0; i < 2; ++i) {
-  //     *value_it++ = (white_right_castle == i) ? 1 : 0;
-  //   }
-    
-  //   for (int i = 0; i < padding; ++i) {
-  //     *value_it++ = 0;
-  //   }
-
-  //   for (int i = 0; i < 2; ++i) {
-  //     *value_it++ = (black_right_castle == i) ? 1 : 0;
-  //   }
-  // } // 2x(2 + 4 + 2 + 2 + 4 + 2) = 32
-
-  // 24 + 8 + 32 = 64
-
-  // for 4x4 board? we have only 16 bits
-  // for (int i = 0; i < 16; ++i) {
-  //   *value_it++ = 0;
-  // }
-
-
-  // Num repetitions for the current board.
-  // AddScalarPlane(repetitions, 1, 3, value_it);
-
-  // // Side to play.
-  // AddScalarPlane(ColorToPlayer(Board().ToPlay()), 0, 1, value_it);
-
-  // // Irreversible move counter.
-  // AddScalarPlane(Board().IrreversibleMoveCounter(), 0, 101, value_it);
-
-  // // Castling rights.
-  // AddBinaryPlane(Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft),
-  //                value_it);
-
-  // AddBinaryPlane(
-  //     Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight),
-  //     value_it);
-
-  // AddBinaryPlane(Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft),
-  //                value_it);
-
-  // AddBinaryPlane(
-  //     Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight),
-  //     value_it);
 
   SPIEL_CHECK_EQ(value_it, values.end());
 }
