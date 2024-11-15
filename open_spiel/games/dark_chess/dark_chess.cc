@@ -469,6 +469,52 @@ class DarkChessObserver : public Observer {
               private_info_table, prefix, allocator);
   WriteUnknownSquares(state.Board(), private_info_table, prefix, allocator);
 
+  // number of initial pieces
+  int queens = state.Queens(color);
+  int rooks = state.Rooks(color);
+  int bishops = state.Bishops(color);
+  int knights = state.Knights(color);
+  int pawns = state.Pawns(color);
+
+  // Here write alive pieces
+  for (int i = 0; i < state.Board().BoardSize(); i++) {
+    for (int j = 0; j < state.Board().BoardSize(); j++) {
+      chess::Square sq{i, j};
+      chess::Piece piece = state.Board().at(sq);
+      if (piece.color == color) {
+        switch (piece.type) {
+          case chess::PieceType::kPawn:
+            pawns--;
+            break;
+          case chess::PieceType::kRook:
+            rooks--;
+            break;
+          case chess::PieceType::kKnight:
+            knights--;
+            break;
+          case chess::PieceType::kBishop:
+            bishops--;
+            break;
+          case chess::PieceType::kQueen:
+            queens--;
+            break;
+          default:
+            break;
+        }
+      }
+    }
+  }
+  auto out = allocator->Get(prefix + "_alive_pawns", {state.Pawns(color)});
+  WritePiecesAlive(pawns, state.Pawns(color), 0, out);
+  out = allocator->Get(prefix + "_alive_rooks", {state.Rooks(color)});
+  WritePiecesAlive(rooks, state.Rooks(color), 0, out);
+  out = allocator->Get(prefix + "_alive_knights", {state.Knights(color)});
+  WritePiecesAlive(knights, state.Knights(color), 0, out);
+  out = allocator->Get(prefix + "_alive_bishops", {state.Bishops(color)});
+  WritePiecesAlive(bishops, state.Bishops(color), 0, out);
+  out = allocator->Get(prefix + "_alive_queens", {state.Queens(color)});
+  WritePiecesAlive(queens, state.Queens(color), 0, out);
+
   // Side to play.
   WriteScalar(/*val=*/ColorToPlayer(state.Board().ToPlay()),
               /*min=*/0, /*max=*/1, "side_to_play", allocator);

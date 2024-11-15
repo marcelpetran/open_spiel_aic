@@ -23,7 +23,7 @@ def main():
     state.apply_action(action)
     # ot = state.state_tensor()
     ot = state.observation_tensor(player)
-    print(f"Observation tensor:\n{len(ot)}\n")
+    print(f"Observation tensor:\n{ot}\n")
   
 
   print("Game over")
