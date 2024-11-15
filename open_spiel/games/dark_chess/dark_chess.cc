@@ -470,18 +470,18 @@ class DarkChessObserver : public Observer {
   WriteUnknownSquares(state.Board(), private_info_table, prefix, allocator);
 
   // number of initial pieces
-  int queens = state.Queens(color);
-  int rooks = state.Rooks(color);
-  int bishops = state.Bishops(color);
-  int knights = state.Knights(color);
-  int pawns = state.Pawns(color);
+  int queens = state.Queens(OppColor(color));
+  int rooks = state.Rooks(OppColor(color));
+  int bishops = state.Bishops(OppColor(color));
+  int knights = state.Knights(OppColor(color));
+  int pawns = state.Pawns(OppColor(color));
 
   // Here write alive pieces
   for (int i = 0; i < state.Board().BoardSize(); i++) {
     for (int j = 0; j < state.Board().BoardSize(); j++) {
       chess::Square sq{i, j};
       chess::Piece piece = state.Board().at(sq);
-      if (piece.color == color) {
+      if (piece.color == OppColor(color)) {
         switch (piece.type) {
           case chess::PieceType::kPawn:
             pawns--;
