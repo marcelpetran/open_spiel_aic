@@ -432,7 +432,7 @@ class DarkChessObserver : public Observer {
     out.at(val - min) = 1;
   }
 
-  void WritePiecesAlive(int val, int max, int offset, SpanTensor& tensor) const {
+  void WritePiecesAlive(int val, int max, SpanTensor& tensor) const {
     for (int i = 0; i < max; i++) {
       tensor.at(i + offset) = (val > i) ? 1.0f : 0.0f;
     }
@@ -505,15 +505,15 @@ class DarkChessObserver : public Observer {
     }
   }
   auto out = allocator->Get(prefix + "_alive_pawns", {state.Pawns(color)});
-  WritePiecesAlive(pawns, state.Pawns(color), 0, out);
+  WritePiecesAlive(pawns, state.Pawns(color), out);
   out = allocator->Get(prefix + "_alive_rooks", {state.Rooks(color)});
-  WritePiecesAlive(rooks, state.Rooks(color), 0, out);
+  WritePiecesAlive(rooks, state.Rooks(color), out);
   out = allocator->Get(prefix + "_alive_knights", {state.Knights(color)});
-  WritePiecesAlive(knights, state.Knights(color), 0, out);
+  WritePiecesAlive(knights, state.Knights(color), out);
   out = allocator->Get(prefix + "_alive_bishops", {state.Bishops(color)});
-  WritePiecesAlive(bishops, state.Bishops(color), 0, out);
+  WritePiecesAlive(bishops, state.Bishops(color), out);
   out = allocator->Get(prefix + "_alive_queens", {state.Queens(color)});
-  WritePiecesAlive(queens, state.Queens(color), 0, out);
+  WritePiecesAlive(queens, state.Queens(color), out);
 
   // Side to play.
   WriteScalar(/*val=*/ColorToPlayer(state.Board().ToPlay()),
