@@ -57,7 +57,7 @@ chess::ObservationTable ComputePrivateInfoTable(
     const chess::ChessBoard& board, chess::Color color,
     const chess::ObservationTable& public_info_table) {
   const int board_size = board.BoardSize();
-  chess::ObservationTable observability_table{false};
+  chess::ObservationTable observability_table(board_size * board_size, false);
   board.GenerateLegalMoves(
       [&](const chess::Move& move) -> bool {
         size_t to_index = chess::SquareToIndex(move.to, board_size);
@@ -75,7 +75,6 @@ chess::ObservationTable ComputePrivateInfoTable(
         return true;
       },
       color);
-
   for (int8_t y = 0; y < board_size; ++y) {
     for (int8_t x = 0; x < board_size; ++x) {
       chess::Square sq{x, y};
@@ -346,7 +345,7 @@ class DarkChessObserver : public Observer {
     if (iig_obs_type_.public_info &&
         iig_obs_type_.private_info == PrivateInfoType::kSinglePlayer) {
       chess::Color color = chess::PlayerToColor(player);
-      chess::ObservationTable empty_public_info_table{};
+      chess::ObservationTable empty_public_info_table(state.Board().BoardSize() * state.Board().BoardSize(), false);
       auto obs_table = ComputePrivateInfoTable(state.Board(), color,
                                                empty_public_info_table);
       return state.Board().ToDarkFEN(obs_table, color);
