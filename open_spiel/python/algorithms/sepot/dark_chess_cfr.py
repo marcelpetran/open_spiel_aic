@@ -22,14 +22,12 @@ def main():
     action = legal_actions[0]
     state.apply_action(action)
     # ot = state.state_tensor()
-    # ot = state.observation_tensor(player)
-    # print(f"Observation tensor:\n{len(ot)}\n")
+    ot = state.observation_tensor(player)
+    print(f"Observation tensor:\n{len(ot)}\n")
   
 
   print("Game over")
-  print("Final state:\n{}".format(str(state)))
-  print("Returns: {}".format(state.returns()))
-  print("Player {} wins".format(state.returns()[0]))
+  print(f"Final state:\n{str(state)}")
 
 
 if __name__ == "__main__":

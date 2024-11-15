@@ -385,13 +385,12 @@ class DarkChessObserver : public Observer {
     }
   }
 
-  void WriteLastSeenPieces(const chess::ChessBoard& board, chess::Color color, chess::PieceType piece_type,
+  void WriteLastSeenPieces(const int board_size, chess::Color color, chess::PieceType piece_type,
     const std::vector<int> last_seen_piece,
     const std::string& prefix, Allocator* allocator) const  {
     const std::string type_string =  chess::PieceTypeToString(
                   piece_type,
                   /*uppercase=*/color == chess::Color::kWhite);
-    const int board_size = board.BoardSize();
     const int max_memory = 40;
     auto out = allocator->Get(prefix + "_" + type_string + "_last_seen_pieces",
                               {board_size, board_size});
@@ -455,10 +454,16 @@ class DarkChessObserver : public Observer {
 
   // Piece configuration.
   for (const chess::PieceType& piece_type : chess::kPieceTypes) {
-    WritePieces(color, piece_type, state.Board(),
+    if (color == chess::Color::kWhite) {
+      WritePieces(chess::Color::kWhite, piece_type, state.Board(),
+                        private_info_table, prefix, allocator);
+      WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kBlack, piece_type, state.LastSeenPiece(chess::Color::kBlack, piece_type), prefix, allocator);
+    }
+    else {
+      WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kWhite, piece_type, state.LastSeenPiece(chess::Color::kWhite, piece_type), prefix, allocator);
+      WritePieces(chess::Color::kBlack, piece_type, state.Board(),
                 private_info_table, prefix, allocator);
-    WritePieces(chess::OppColor(color), piece_type, state.Board(),
-                private_info_table, prefix, allocator);
+    }
   }
   WritePieces(chess::Color::kEmpty, chess::PieceType::kEmpty, state.Board(),
               private_info_table, prefix, allocator);
