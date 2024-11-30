@@ -384,10 +384,15 @@ class DarkChessObserver : public Observer {
     }
   }
 
-  void WriteLastSeenPieces(const int board_size, chess::Color color, chess::PieceType piece_type,
-    const std::vector<int> last_seen_piece,
-    const std::string& prefix, Allocator* allocator) const  {
-    const std::string type_string =  chess::PieceTypeToString(
+  void WriteLastSeenPieces(
+      const int board_size, 
+      chess::Color color, 
+      chess::PieceType piece_type,
+      const std::vector<int> last_seen_piece,
+      const std::string& prefix, Allocator* allocator
+    ) const  {
+
+    const std::string type_string = chess::PieceTypeToString(
                   piece_type,
                   /*uppercase=*/color == chess::Color::kWhite);
     const int max_memory = 40;
@@ -574,8 +579,7 @@ DarkChessState::DarkChessState(std::shared_ptr<const Game> game, int board_size,
       start_board_(*chess::ChessBoard::BoardFromFEN(fen, board_size, true)),
       current_board_(start_board_) {
   SPIEL_CHECK_TRUE(&current_board_);
-
-  // TODO(petram): redo for different board sizes
+  
   // SPIEL_CHECK_EQ(8, board_size);
   repetitions_[current_board_.HashValue()] = 1;
   int board_area = board_size * board_size;
