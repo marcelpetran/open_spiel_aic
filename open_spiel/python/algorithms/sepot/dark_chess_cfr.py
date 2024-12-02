@@ -33,7 +33,6 @@ def main():
   parsed_observation_tensor = fp_game.get_observation_tensor(0)
   print(f"Observation tensor {parsed_observation_tensor.shape}:\n{parsed_observation_tensor}\n")
   print(f"flatten observation tensor:\n{parsed_observation_tensor.flatten()}\n")
-  print(f"Last dimension:\n{parsed_observation_tensor[:, :, 14:].flatten()}\n")
 
   # print(state.observation_tensor(1))
   # tab_policy = policy.TabularPolicy(game)
