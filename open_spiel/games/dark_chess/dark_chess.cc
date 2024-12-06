@@ -464,9 +464,9 @@ class DarkChessObserver : public Observer {
       WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kBlack, piece_type, state.LastSeenPiece(chess::Color::kBlack, piece_type), prefix, allocator);
     }
     else {
-      WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kWhite, piece_type, state.LastSeenPiece(chess::Color::kWhite, piece_type), prefix, allocator);
       WritePieces(chess::Color::kBlack, piece_type, state.Board(),
                 private_info_table, prefix, allocator);
+      WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kWhite, piece_type, state.LastSeenPiece(chess::Color::kWhite, piece_type), prefix, allocator);
     }
   }
   WritePieces(chess::Color::kEmpty, chess::PieceType::kEmpty, state.Board(),

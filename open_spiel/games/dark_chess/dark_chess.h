@@ -234,6 +234,7 @@ class DarkChessGame : public Game {
       6 + // Opponent piece types
       1 + // Empty tile
       1 + // Unknown tile
+      1 + // information about the opponent's remaining pieces
       1 // 3 public: repetitions count in one-hot encoding, 2 public: side to play, 1 public: irreversible move counter -- a fraction of $n over 100, 4 private: left/right castling rights, one-hot encoded. In the dark chess original this require only 10 tiles, so we will have some overhead
     };
 
