@@ -63,6 +63,9 @@ chess::ObservationTable ComputePrivateInfoTable(
         size_t to_index = chess::SquareToIndex(move.to, board_size);
         if (!public_info_table[to_index]) observability_table[to_index] = true;
 
+        // because of logic in PublicInfoTable ~ if we see piece that see us -> common knowledge
+        if (public_info_table[to_index]) observability_table[to_index] = true;
+
         if (move.to == board.EpSquare() &&
             move.piece.type == chess::PieceType::kPawn) {
           int8_t reversed_y_direction = color == chess::Color::kWhite ? -1 : 1;
@@ -436,9 +439,20 @@ class DarkChessObserver : public Observer {
     out.at(val - min) = 1;
   }
 
-  void WritePiecesAlive(int val, int max, SpanTensor& tensor) const {
+  void WritePiecesAlive(int val, int max, int& row, int& col, int board_size, SpanTensor& tensor) const {
     for (int i = 0; i < max; i++) {
-      tensor.at(i) = (val > i) ? 1.0f : 0.0f;
+      if (val > i) {
+        // alive
+        tensor.at(row, col) = 1.0f;
+      } else {
+        // dead
+        tensor.at(row+1, col) = 1.0f;
+      }
+      col++;
+      if (col == board_size) {
+        col = 0;
+        row += 2;
+      }
     }
   }
 
@@ -452,92 +466,93 @@ class DarkChessObserver : public Observer {
                             const chess::ObservationTable& public_info_table,
                             int player, const std::string& prefix,
                             Allocator* allocator) const {
-  chess::Color color = chess::PlayerToColor(player);
-  chess::ObservationTable private_info_table =
-      ComputePrivateInfoTable(state.Board(), color, public_info_table);
+    chess::Color color = chess::PlayerToColor(player);
+    chess::ObservationTable private_info_table =
+        ComputePrivateInfoTable(state.Board(), color, public_info_table);
 
-  // Piece configuration.
-  for (const chess::PieceType& piece_type : chess::kPieceTypes) {
-    if (color == chess::Color::kWhite) {
-      WritePieces(chess::Color::kWhite, piece_type, state.Board(),
-                        private_info_table, prefix, allocator);
-      WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kBlack, piece_type, state.LastSeenPiece(chess::Color::kBlack, piece_type), prefix, allocator);
+    // layer_0 to _5 ~ player's pieces
+    for (const chess::PieceType& piece_type : chess::kPieceTypes) {
+      if (color == chess::Color::kWhite) {
+        WritePieces(chess::Color::kWhite, piece_type, state.Board(),
+                          private_info_table, prefix, allocator);
+      }
+      else {
+        WritePieces(chess::Color::kBlack, piece_type, state.Board(),
+                  private_info_table, prefix, allocator);
+      }
     }
-    else {
-      WritePieces(chess::Color::kBlack, piece_type, state.Board(),
-                private_info_table, prefix, allocator);
-      WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kWhite, piece_type, state.LastSeenPiece(chess::Color::kWhite, piece_type), prefix, allocator);
+    // layer_6 to _11 ~ last seen pieces
+    for (const chess::PieceType& piece_type : chess::kPieceTypes) {
+      if (color == chess::Color::kWhite) {
+        WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kBlack, piece_type, state.LastSeenPiece(chess::Color::kBlack, piece_type), prefix, allocator);
+      }
+      else {
+        WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kWhite, piece_type, state.LastSeenPiece(chess::Color::kWhite, piece_type), prefix, allocator);
+      }
     }
-  }
-  WritePieces(chess::Color::kEmpty, chess::PieceType::kEmpty, state.Board(),
-              private_info_table, prefix, allocator);
-  WriteUnknownSquares(state.Board(), private_info_table, prefix, allocator);
+    // layer_12 and _13 ~ empty squares and unknown squares
+    WritePieces(chess::Color::kEmpty, chess::PieceType::kEmpty, state.Board(),
+            private_info_table, prefix, allocator);
+    WriteUnknownSquares(state.Board(), private_info_table, prefix, allocator);
 
-  // number of initial pieces
-  int queens, rooks, bishops, knights, pawns = 0;
-  int max_q = state.Queens(OppColor(color));
-  int max_r = state.Rooks(OppColor(color));
-  int max_b = state.Bishops(OppColor(color));
-  int max_n = state.Knights(OppColor(color));
-  // Here write alive pieces
-  for (int i = 0; i < state.Board().BoardSize(); i++) {
-    for (int j = 0; j < state.Board().BoardSize(); j++) {
-      chess::Square sq{i, j};
-      chess::Piece piece = state.Board().at(sq);
-      if (piece.color == OppColor(color)) {
-        switch (piece.type) {
-          case chess::PieceType::kPawn:
-            pawns++;
-            break;
-          case chess::PieceType::kRook:
-            if ((++rooks) > max_r) {
-              max_r++;
-            }
-            break;
-          case chess::PieceType::kKnight:
-            if ((++knights) > max_n) {
-              max_n++;
-            }
-            break;
-          case chess::PieceType::kBishop:
-            if ((++bishops) > max_b) {
-              max_b++;
-            }
-            break;
-          case chess::PieceType::kQueen:
-            if ((++queens) > max_q) {
-              max_q++;
-            }
-            break;
-          default:
-            break;
+    // number of initial pieces for opponent
+    int max_q = state.Queens(OppColor(color));
+    int max_r = state.Rooks(OppColor(color));
+    int max_b = state.Bishops(OppColor(color));
+    int max_n = state.Knights(OppColor(color));
+    int max_p = state.Pawns(OppColor(color));
+
+    // find all remaining opponent pieces
+    std::array<int, 6> pieces_on_board = {0};
+    for (int8_t y = 0; y < state.BoardSize(); ++y) {
+      for (int8_t x = 0; x < state.BoardSize(); ++x) {
+        const chess::Square square{x, y};
+        const chess::Piece& piece_on_board = state.Board().at(square);
+        int piece_type = (int) piece_on_board.type;
+        if (piece_on_board.color == OppColor(color)) {
+          pieces_on_board[piece_type - 1]++; // We do not care about empty tiles
         }
       }
     }
+    SPIEL_CHECK_EQ(pieces_on_board[0], 1); // King has to be there!
+
+    auto layer_14 = allocator->Get("remainign_pieces", {state.BoardSize(), state.BoardSize()}); // each piece is ether alive or dead
+    
+    // write in order: queens < rooks < bishops < knights < pawns
+    int row = 0;
+    int col = 0;
+    WritePiecesAlive(pieces_on_board[1], max_q, row, col, state.BoardSize(), layer_14);
+    WritePiecesAlive(pieces_on_board[2], max_r, row, col, state.BoardSize(), layer_14);
+    WritePiecesAlive(pieces_on_board[3], max_b, row, col, state.BoardSize(), layer_14);
+    WritePiecesAlive(pieces_on_board[4], max_n, row, col, state.BoardSize(), layer_14);
+    WritePiecesAlive(pieces_on_board[5], max_p, row, col, state.BoardSize(), layer_14);
+
+    auto layer_15 = allocator->Get("final_layer", {state.BoardSize(), state.BoardSize()});
+
+    // Side to play [White, Black]
+    layer_15.at(0, 0) = ColorToPlayer(state.Board().ToPlay()) == 1 ? 1.0f : 0.0f;
+    layer_15.at(0, 1) = ColorToPlayer(state.Board().ToPlay()) == 0 ? 1.0f : 0.0f;
+    row = 1;
+    if (state.BoardSize() > 4) {
+      row++;
+    }
+    // repetitions
+    const auto entry = state.repetitions_.find(state.Board().HashValue());
+    SPIEL_CHECK_FALSE(entry == state.repetitions_.end());
+    int repetitions = entry->second;
+    layer_15.at(row, repetitions - 1) = 1.0f;
+
+    // castling rights
+    // col positions: [0 ~ No kingside, 1 ~ Yes kingside], [board_size - 2 ~ No queenside, board_size - 1 ~ Yes queenside]
+    row = state.BoardSize() - 1;
+    if (color == chess::Color::kWhite) {
+      layer_15.at(row, state.Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight)) = 1.0f;
+      layer_15.at(row, row + state.Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft) - 1) = 1.0f;
+    } else {
+      layer_15.at(row, state.Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight)) = 1.0f;
+      layer_15.at(row, row + state.Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft) - 1) = 1.0f;
+    }
   }
-  auto out = allocator->Get(prefix + "_alive_pawns", {state.Pawns(OppColor(color))});
-  WritePiecesAlive(pawns, state.Pawns(OppColor(color)), out);
-  out = allocator->Get(prefix + "_alive_rooks", {max_r});
-  WritePiecesAlive(rooks, max_r, out);
-  out = allocator->Get(prefix + "_alive_knights", {max_n});
-  WritePiecesAlive(knights, max_n, out);
-  out = allocator->Get(prefix + "_alive_bishops", {max_b});
-  WritePiecesAlive(bishops, max_b, out);
-  out = allocator->Get(prefix + "_alive_queens", {max_q});
-  WritePiecesAlive(queens, max_q, out);
-
-  // Side to play.
-  WriteScalar(/*val=*/ColorToPlayer(state.Board().ToPlay()),
-              /*min=*/0, /*max=*/1, "side_to_play", allocator);
-
-  // Castling rights.
-  WriteScalar(
-      state.Board().CastlingRight(color, chess::CastlingDirection::kLeft), 0, 1,
-      prefix + "_left_castling", allocator);
-  WriteScalar(
-      state.Board().CastlingRight(color, chess::CastlingDirection::kRight), 0, 1,
-      prefix + "_right_castling", allocator);
-}
 
   void WritePublicInfoTensor(const DarkChessState& state,
                              const chess::ObservationTable& public_info_table,
@@ -583,19 +598,31 @@ DarkChessState::DarkChessState(std::shared_ptr<const Game> game, int board_size,
   // SPIEL_CHECK_EQ(8, board_size);
   repetitions_[current_board_.HashValue()] = 1;
   int board_area = board_size * board_size;
-  // last_seen_ = std::array<std::array<std::array<int, 64>, 6>, 2>();
+  
+  // initialize last seen pieces that players can see
   last_seen_ = std::vector<std::vector<std::vector<int>>>(
       2, std::vector<std::vector<int>>(6, std::vector<int>(board_area, -1)));
-
-  // TODO(kubicon) Move this to a separate function for DRY.
-  for (int8_t y = 0; y < board_size; ++y) {
-    for (int8_t x = 0; x < board_size; ++x) {
-      chess::Square sq{x, y};
-      chess::Piece piece = current_board_.at(sq);
-      if (piece.color != chess::Color::kEmpty) {
-        int piece_type = (int) piece.type;
-        SPIEL_CHECK_GT(piece_type, 0); // Piece cannot be empty
-        last_seen_[ToInt(piece.color)][piece_type - 1][chess::SquareToIndex(sq, board_size)] = 0;
+  
+  auto public_info_table = ComputePublicInfoTable(Board());
+  for (int pl = 0; pl < 2; ++pl) {
+    chess::Color color = chess::PlayerToColor(pl);
+    chess::ObservationTable private_info_table =
+        ComputePrivateInfoTable(Board(), color, public_info_table);
+    // If we still see a piece we update it 
+    for (int y = 0; y < BoardSize(); ++y) {
+      for (int x = 0; x < BoardSize(); ++x) {
+        chess::Square sq{x, y};
+        int board_index = chess::SquareToIndex(sq, BoardSize());
+        if (!(public_info_table[board_index] || private_info_table[board_index])) {
+          continue;
+        }
+        chess::Piece piece = Board().at(sq);
+        // Only opponents pieces are updated
+        if (piece.color != chess::Color::kEmpty && piece.color != color) {
+          int piece_type = (int) piece.type;
+          SPIEL_CHECK_GT(piece_type, 0); // Piece cannot be empty
+          last_seen_[ToInt(piece.color)][piece_type - 1][board_index] = 0;
+        }
       }
     }
   }
@@ -710,50 +737,67 @@ void DarkChessState::StateTensor(absl::Span<float> values) const {
   const auto entry = repetitions_.find(Board().HashValue());
   SPIEL_CHECK_FALSE(entry == repetitions_.end());
   int repetitions = entry->second;
-  int player_to_play = ColorToPlayer(Board().ToPlay());
-  // int irreversible_move_counter = Board().IrreversibleMoveCounter(); // Just way too complicated to be useful in the game
-  int white_left_castle = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft);
-  int white_right_castle = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight);
-  int black_left_castle = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft);
-  int black_right_castle = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight);
 
-  int bit_limit = BoardSize() * BoardSize();
-  int repetition_limit = (BoardSize() >= 6) ? 3 : 2;
-  int player_limit = (BoardSize() >= 6) ? 2 : 1;
-  int padding_bits = (BoardSize() / 2);
-  int castle_padding = (BoardSize() >= 6) ? 4 : 2;
+  int row = 0;
 
-  // Repetitions
-  for (int j = 0; j < repetition_limit; ++j) {
-      for (int i = 0; i < repetition_limit; ++i) {
-          *value_it++ = (repetitions == i + 1) ? 1 : 0;
-      }
+  // Side to play [White, Black]
+  *value_it++ = ColorToPlayer(Board().ToPlay()) == 1 ? 1.0f : 0.0f;
+  *value_it++ = ColorToPlayer(Board().ToPlay()) == 0 ? 1.0f : 0.0f;
+  // fill rest of row with zeros
+  for (int i = 2; i < BoardSize(); ++i) {
+    *value_it++ = 0.0f;
+  }
+  row++;
+  if (BoardSize() > 5) {
+    // fill row with zeros
+    for (int i = 0; i < BoardSize(); ++i) {
+      *value_it++ = 0.0f;
+    }
+    row++;
+  }
+  // one-hot repetitions
+  for (int i = 0; i < 3; ++i) {
+    *value_it++ = repetitions == i + 1 ? 1.0f : 0.0f;
+  }
+  // fill rest of row with zeros
+  for (int i = 3; i < BoardSize(); ++i) {
+    *value_it++ = 0.0f;
+  }
+  row++;
+  if (BoardSize() > 4) {
+    // fill row with zeros
+    for (int i = 0; i < BoardSize(); ++i) {
+      *value_it++ = 0.0f;
+    }
+    row++;
   }
 
-  // Player to Play
-  for (int i = 0; i < player_limit * 2; ++i) {
-      *value_it++ = (player_to_play == i) ? 1 : 0;
+  // fill remaining rows with zeros until second last row
+  for (int i = row; i < BoardSize() - 2; ++i) {
+    for (int j = 0; j < BoardSize(); ++j) {
+      *value_it++ = 0.0f;
+    }
   }
 
-  // Padding
-  for (int i = 0; i < padding_bits; ++i) {
-      *value_it++ = 0;
+  // castling rights
+  // col positions: [0 ~ No kingside, 1 ~ Yes kingside], [board_size - 2 ~ No queenside, board_size - 1 ~ Yes queenside]
+  *value_it++ = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight) ? 1.0f : 0.0f;
+  *value_it++ = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight) ? 0.0f : 1.0f;
+  // inner fill
+  for (int i = 2; i < BoardSize() - 2; ++i) {
+    *value_it++ = 0.0f;
   }
+  *value_it++ = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft) ? 1.0f : 0.0f;
+  *value_it++ = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft) ? 0.0f : 1.0f;
 
-  // Castle Rights (adjusted based on board size)
-  for (int j = 0; j < player_limit * 2; ++j) {
-      for (int i = 0; i < player_limit; ++i) {
-          *value_it++ = (white_left_castle == i) ? 1 : 0;
-          *value_it++ = (black_left_castle == i) ? 1 : 0;
-          *value_it++ = (white_right_castle == i) ? 1 : 0;
-          *value_it++ = (black_right_castle == i) ? 1 : 0;
-      }
+  *value_it++ = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight) ? 1.0f : 0.0f;
+  *value_it++ = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight) ? 0.0f : 1.0f;
+  // inner fill
+  for (int i = 2; i < BoardSize() - 2; ++i) {
+    *value_it++ = 0.0f;
   }
-
-  // Final Padding to Complete Bit Limit
-  for (int i = 0; i < (bit_limit - (repetition_limit * repetition_limit + player_limit * 2 + padding_bits + player_limit * 8)); ++i) {
-      *value_it++ = 0;
-  }
+  *value_it++ = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft) ? 1.0f : 0.0f;
+  *value_it++ = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft) ? 0.0f : 1.0f;
 
   SPIEL_CHECK_EQ(value_it, values.end());
 }

@@ -68,8 +68,8 @@ enum class PieceType : int8_t {
 };
 
 static inline constexpr std::array<PieceType, 6> kPieceTypes = {
-    {PieceType::kKing, PieceType::kQueen, PieceType::kBishop,
-     PieceType::kKnight, PieceType::kRook, PieceType::kPawn}};
+    {PieceType::kKing, PieceType::kQueen, PieceType::kRook, PieceType::kBishop,
+     PieceType::kKnight, PieceType::kPawn}};
 
 // In case all the pieces are represented in the same plane, these values are
 // used to represent each piece type.
