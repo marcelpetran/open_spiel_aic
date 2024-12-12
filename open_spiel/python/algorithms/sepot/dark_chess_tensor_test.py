@@ -28,6 +28,8 @@ def play_one_game():
     # "fen": "nqkb/pppp/PPPP/NQKB w - - 0 1",
     "fen": "r2k/4/4/R2K w - - 0 1",
     # "fen": "rnqkb/ppppp/5/PPPPP/RNQKB w - - 0 1",
+    # "fen": "rnqkbr/pppppp/6/6/PPPPPP/RNQKBR w - - 0 1",
+    # "fen": "rnbkbnr/ppppppp/7/7/7/PPPPPPP/RNBKBNR w - - 0 1",
     # "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     
   }
