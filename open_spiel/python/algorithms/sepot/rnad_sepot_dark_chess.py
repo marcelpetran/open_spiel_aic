@@ -981,6 +981,9 @@ class RNaDSolver(policy_lib.Policy):
     if self._game.get_type().dynamics == pyspiel.GameType.Dynamics.SIMULTANEOUS:
         self._game = pyspiel.load_game_as_turn_based(self.config.game_name, game_params)
 
+    self._obs_shape = tuple(self._game.observation_tensor_shape())
+    self._state_shape = tuple(self._game.state_tensor_shape())
+
     self._ex_state = self._play_chance(self._game.new_initial_state())
 
     self.network = RNaDNetwork(self._game.num_distinct_actions(), 2048, [[5, 128], [5, 256]])
@@ -1501,8 +1504,9 @@ class RNaDSolver(policy_lib.Policy):
 
     # TODO(author16): clarify the story around rewards and valid.
     return EnvStep(
-        obs=np.transpose(np.array(obs, dtype=np.float64).reshape(15, 8, 8), (1, 2, 0)),
-        state=np.transpose(np.array(state.state_tensor(), dtype=np.float64).reshape(14, 8, 8), (1, 2, 0)),
+      # current obs shape (bs, bs, 16) and state tensor shape (bs, bs, 14) where bs is board size
+        obs=np.transpose(np.array(obs, dtype=np.float64).reshape(self._obs_shape[::-1]), (1, 2, 0)),
+        state=np.transpose(np.array(state.state_tensor(), dtype=np.float64).reshape(self._state_shape[::-1]), (1, 2, 0)),
         legal=np.array(state.legal_actions_mask(), dtype=np.int8),
         player_id=np.array(state.current_player(), dtype=np.float64),
         valid=np.array(valid, dtype=np.float64),

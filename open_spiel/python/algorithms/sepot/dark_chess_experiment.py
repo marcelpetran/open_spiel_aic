@@ -16,6 +16,7 @@ import os
 import argparse
 import numpy as np
 import pickle
+import ast
 
 import time
 
@@ -47,11 +48,13 @@ parser.add_argument("--eta", default=0.2, type=float, help="Regularization term"
 parser.add_argument("--num_transformations", default=10, type=int, help="Transformations of both players")
 
 # Game Setting 
-
+parser.add_argument("--game_name", default="dark_chess", type=str, help="Game name")
+parser.add_argument("--game_params", default=tuple(), nargs="+", help="Game params, e.g. board size, fen")
 
 def train():
   args = parser.parse_args([] if "__file__" not in globals() else None)
-  game_name = "dark_chess" 
+  game_name = args.game_name
+  game_params = [ast.literal_eval(param) for param in args.game_params]
  
   save_folder = "sepot_networks/dark_chess"
   if not os.path.exists(save_folder):
@@ -60,7 +63,7 @@ def train():
   max_trajectory = 100
   rnad_config = rnad.RNaDConfig(
       game_name = game_name, 
-      game_params = tuple(),
+      game_params = game_params,
       trajectory_max =  max_trajectory,
       # policy_network_layers = args.rnad_network_layers,
       # mvs_network_layers = args.mvs_network_layers,
@@ -111,7 +114,6 @@ def train():
 
 def cont_train():
   args = parser.parse_args([] if "__file__" not in globals() else None)
-  game_name = "dark_chess" 
  
   save_folder = "sepot_networks/dark_chess"
   
@@ -149,7 +151,8 @@ def cont_train():
 
 def parallel_train():
   args = parser.parse_args([] if "__file__" not in globals() else None)
-  game_name = "dark_chess" 
+  game_name = args.game_name
+  game_params = [ast.literal_eval(param) for param in args.game_params]
  
   save_folder = "sepot_networks/dark_chess"
   if not os.path.exists(save_folder):
@@ -158,7 +161,7 @@ def parallel_train():
   max_trajectory = 100
   rnad_config = rnad.RNaDConfig(
       game_name = game_name, 
-      game_params = tuple(),
+      game_params = game_params,
       trajectory_max =  max_trajectory,
       # policy_network_layers = args.rnad_network_layers,
       # mvs_network_layers = args.mvs_network_layers,
@@ -192,5 +195,6 @@ def parallel_train():
 
 
 if __name__ == "__main__":
-  cont_train()
+  # cont_train()
+  train()
   

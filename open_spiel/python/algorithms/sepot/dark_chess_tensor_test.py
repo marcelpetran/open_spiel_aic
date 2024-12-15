@@ -35,7 +35,10 @@ def play_one_game():
   }
   game = pyspiel.load_game("dark_chess", game_params)
   state = game.new_initial_state()
-  
+
+  print(game.observation_tensor_shape())
+  print(game.state_tensor_shape())
+
   fp_game = fp(game_params["board_size"], game_params["fen"])
   fp_game.update_state(global_fen= state.to_string(), 
                        white_fen= state.observation_string(1), 
