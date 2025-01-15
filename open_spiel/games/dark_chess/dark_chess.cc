@@ -61,10 +61,7 @@ chess::ObservationTable ComputePrivateInfoTable(
   board.GenerateLegalMoves(
       [&](const chess::Move& move) -> bool {
         size_t to_index = chess::SquareToIndex(move.to, board_size);
-        if (!public_info_table[to_index]) observability_table[to_index] = true;
-
-        // because of logic in PublicInfoTable ~ if we see piece that see us -> common knowledge
-        if (public_info_table[to_index]) observability_table[to_index] = true;
+        observability_table[to_index] = true;
 
         if (move.to == board.EpSquare() &&
             move.piece.type == chess::PieceType::kPawn) {
@@ -72,7 +69,6 @@ chess::ObservationTable ComputePrivateInfoTable(
           chess::Square en_passant_capture =
               move.to + chess::Offset{0, reversed_y_direction};
           size_t index = chess::SquareToIndex(en_passant_capture, board_size);
-          // if (!public_info_table[index]) observability_table[index] = true;
           observability_table[index] = true;
         }
         return true;
@@ -84,7 +80,6 @@ chess::ObservationTable ComputePrivateInfoTable(
       const auto& piece = board.at(sq);
       if (piece.color == color) {
         size_t index = chess::SquareToIndex(sq, board_size);
-        // if (!public_info_table[index]) observability_table[index] = true;
         observability_table[index] = true;
       }
     }
@@ -303,6 +298,7 @@ class DarkChessObserver : public Observer {
                  /*has_tensor=*/ObserverHasTensor(iig_obs_type)),
         iig_obs_type_(iig_obs_type) {}
 
+  // Writes the private and public information of the state to the tensor.
   void WriteTensor(const State& observed_state, int player,
                    Allocator* allocator) const override {
     auto& state = open_spiel::down_cast<const DarkChessState&>(observed_state);
@@ -331,6 +327,22 @@ class DarkChessObserver : public Observer {
         WritePrivateInfoTensor(state, public_info_table, i, prefix, allocator);
       }
     }
+  }
+
+  // Writes State tensor
+  void WriteTensor(const State& observed_state,
+                   Allocator* allocator) const {
+    auto& state = open_spiel::down_cast<const DarkChessState&>(observed_state);
+    auto& game = open_spiel::down_cast<const DarkChessGame&>(*state.GetGame());
+
+    if (iig_obs_type_.perfect_recall) {
+      SpielFatalError(
+          "DarkChessObserver: tensor with perfect recall not implemented.");
+    }
+
+    chess::ObservationTable state_info_table(state.BoardSize() * state.BoardSize(), true);
+
+    WritePublicInfoTensor(state, state_info_table, allocator);
   }
 
   std::string StringFrom(const State& observed_state,
@@ -516,7 +528,7 @@ class DarkChessObserver : public Observer {
     }
     SPIEL_CHECK_EQ(pieces_on_board[0], 1); // King has to be there!
 
-    auto layer_14 = allocator->Get("remainign_pieces", {state.BoardSize(), state.BoardSize()}); // each piece is ether alive or dead
+    auto layer_14 = allocator->Get("remaining_pieces", {state.BoardSize(), state.BoardSize()}); // each piece is ether alive or dead
     
     // write in order: queens < rooks < bishops < knights < pawns
     int row = 0;
@@ -527,7 +539,7 @@ class DarkChessObserver : public Observer {
     WritePiecesAlive(pieces_on_board[4], max_n, row, col, state.BoardSize(), layer_14);
     WritePiecesAlive(pieces_on_board[5], max_p, row, col, state.BoardSize(), layer_14);
 
-    auto layer_15 = allocator->Get("final_layer", {state.BoardSize(), state.BoardSize()});
+    auto layer_15 = allocator->Get(prefix + "_" + "additional_details", {state.BoardSize(), state.BoardSize()});
 
     // Side to play [White, Black]
     layer_15.at(0, 0) = ColorToPlayer(state.Board().ToPlay()) == 1 ? 1.0f : 0.0f;
@@ -545,44 +557,55 @@ class DarkChessObserver : public Observer {
     // castling rights
     // col positions: [0 ~ No kingside, 1 ~ Yes kingside], [board_size - 2 ~ No queenside, board_size - 1 ~ Yes queenside]
     row = state.BoardSize() - 1;
-    if (color == chess::Color::kWhite) {
-      layer_15.at(row, state.Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight)) = 1.0f;
-      layer_15.at(row, row + state.Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft) - 1) = 1.0f;
-    } else {
-      layer_15.at(row, state.Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight)) = 1.0f;
-      layer_15.at(row, row + state.Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft) - 1) = 1.0f;
-    }
+    layer_15.at(row, state.Board().CastlingRight(color, chess::CastlingDirection::kRight)) = 1.0f;
+    layer_15.at(row, row + state.Board().CastlingRight(color, chess::CastlingDirection::kLeft) - 1) = 1.0f;
   }
 
   void WritePublicInfoTensor(const DarkChessState& state,
-                             const chess::ObservationTable& public_info_table,
+                             const chess::ObservationTable& state_info_table,
                              Allocator* allocator) const {
-    const auto entry = state.repetitions_.find(state.Board().HashValue());
-    SPIEL_CHECK_FALSE(entry == state.repetitions_.end());
-    int repetitions = entry->second;
-
     // Piece configuration.
     std::string prefix = "public";
     for (const chess::PieceType& piece_type : chess::kPieceTypes) {
       WritePieces(chess::Color::kWhite, piece_type, state.Board(),
-                  public_info_table, prefix, allocator);
+                  state_info_table, prefix, allocator);
+    }
+    for (const chess::PieceType& piece_type : chess::kPieceTypes) {
       WritePieces(chess::Color::kBlack, piece_type, state.Board(),
-                  public_info_table, prefix, allocator);
+                  state_info_table, prefix, allocator);
     }
     WritePieces(chess::Color::kEmpty, chess::PieceType::kEmpty, state.Board(),
-                public_info_table, prefix, allocator);
+                state_info_table, prefix, allocator);
 
-    // Num repetitions for the current board.
-    WriteScalar(/*val=*/repetitions, /*min=*/1, /*max=*/3, "repetitions",
-                allocator);
+    auto layer_14 = allocator->Get(prefix + "_" + "additional_details", {state.BoardSize(), state.BoardSize()});
 
-    // Side to play.
-    WriteScalar(/*val=*/ColorToPlayer(state.Board().ToPlay()),
-                /*min=*/0, /*max=*/1, "side_to_play", allocator);
+    // Side to play [White, Black]
+    layer_14.at(0, 0) = ColorToPlayer(state.Board().ToPlay()) == 1 ? 1.0f : 0.0f;
+    layer_14.at(0, 1) = ColorToPlayer(state.Board().ToPlay()) == 0 ? 1.0f : 0.0f;
+    int row = 1;
+    if (state.BoardSize() > 5) {
+      row++;
+    }
+    // repetitions
+    const auto entry = state.repetitions_.find(state.Board().HashValue());
+    SPIEL_CHECK_FALSE(entry == state.repetitions_.end());
+    int repetitions = entry->second;
+    layer_14.at(row, repetitions - 1) = 1.0f;
 
-    // Irreversible move counter.
-    auto out = allocator->Get("irreversible_move_counter", {1});
-    out.at(0) = state.Board().IrreversibleMoveCounter() / 100.;
+    // castling rights
+    // col positions: [0 ~ No kingside, 1 ~ Yes kingside], [board_size - 2 ~ No queenside, board_size - 1 ~ Yes queenside]
+    row = state.BoardSize() - 2;
+    layer_14.at(row, state.Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight)) = 1.0f;
+    layer_14.at(row, row + state.Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft)) = 1.0f;
+    
+    row++;
+    
+    layer_14.at(row, state.Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight)) = 1.0f;
+    layer_14.at(row, row + state.Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft) - 1) = 1.0f;
+
+    // Irreversible move counter. Is this needed?
+    // auto out = allocator->Get("irreversible_move_counter", {1});
+    // out.at(0) = state.Board().IrreversibleMoveCounter() / 100.;
   }
 
   IIGObservationType iig_obs_type_;
@@ -600,9 +623,11 @@ DarkChessState::DarkChessState(std::shared_ptr<const Game> game, int board_size,
   int board_area = board_size * board_size;
   
   // initialize last seen pieces that players can see
-  last_seen_ = std::vector<std::vector<std::vector<int>>>(
-      2, std::vector<std::vector<int>>(6, std::vector<int>(board_area, -1)));
-  
+  for (auto& middle : last_seen_) {
+    for (auto& inner : middle) {
+        inner = std::vector<int>(board_area, -1);
+    }
+  }
   auto public_info_table = ComputePublicInfoTable(Board());
   for (int pl = 0; pl < 2; ++pl) {
     chess::Color color = chess::PlayerToColor(pl);
@@ -724,82 +749,9 @@ void DarkChessState::ObservationTensor(Player player,
 
 
 void DarkChessState::StateTensor(absl::Span<float> values) const {
-  auto value_it = values.begin();
-
-  // Piece configuration.
-  for (const auto& piece_type : chess::kPieceTypes) {
-    AddPieceTypePlane(chess::Color::kWhite, piece_type, Board(), value_it);
-    AddPieceTypePlane(chess::Color::kBlack, piece_type, Board(), value_it);
-  }
-
-  AddPieceTypePlane(chess::Color::kEmpty, chess::PieceType::kEmpty, Board(), value_it);
-
-  const auto entry = repetitions_.find(Board().HashValue());
-  SPIEL_CHECK_FALSE(entry == repetitions_.end());
-  int repetitions = entry->second;
-
-  int row = 0;
-
-  // Side to play [White, Black]
-  *value_it++ = ColorToPlayer(Board().ToPlay()) == 1 ? 1.0f : 0.0f;
-  *value_it++ = ColorToPlayer(Board().ToPlay()) == 0 ? 1.0f : 0.0f;
-  // fill rest of row with zeros
-  for (int i = 2; i < BoardSize(); ++i) {
-    *value_it++ = 0.0f;
-  }
-  row++;
-  if (BoardSize() > 5) {
-    // fill row with zeros
-    for (int i = 0; i < BoardSize(); ++i) {
-      *value_it++ = 0.0f;
-    }
-    row++;
-  }
-  // one-hot repetitions
-  for (int i = 0; i < 3; ++i) {
-    *value_it++ = repetitions == i + 1 ? 1.0f : 0.0f;
-  }
-  // fill rest of row with zeros
-  for (int i = 3; i < BoardSize(); ++i) {
-    *value_it++ = 0.0f;
-  }
-  row++;
-  if (BoardSize() > 4) {
-    // fill row with zeros
-    for (int i = 0; i < BoardSize(); ++i) {
-      *value_it++ = 0.0f;
-    }
-    row++;
-  }
-
-  // fill remaining rows with zeros until second last row
-  for (int i = row; i < BoardSize() - 2; ++i) {
-    for (int j = 0; j < BoardSize(); ++j) {
-      *value_it++ = 0.0f;
-    }
-  }
-
-  // castling rights
-  // col positions: [0 ~ No kingside, 1 ~ Yes kingside], [board_size - 2 ~ No queenside, board_size - 1 ~ Yes queenside]
-  *value_it++ = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight) ? 1.0f : 0.0f;
-  *value_it++ = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight) ? 0.0f : 1.0f;
-  // inner fill
-  for (int i = 2; i < BoardSize() - 2; ++i) {
-    *value_it++ = 0.0f;
-  }
-  *value_it++ = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft) ? 1.0f : 0.0f;
-  *value_it++ = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft) ? 0.0f : 1.0f;
-
-  *value_it++ = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight) ? 1.0f : 0.0f;
-  *value_it++ = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight) ? 0.0f : 1.0f;
-  // inner fill
-  for (int i = 2; i < BoardSize() - 2; ++i) {
-    *value_it++ = 0.0f;
-  }
-  *value_it++ = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft) ? 1.0f : 0.0f;
-  *value_it++ = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft) ? 0.0f : 1.0f;
-
-  SPIEL_CHECK_EQ(value_it, values.end());
+  ContiguousAllocator allocator(values);
+  const auto& game = open_spiel::down_cast<const DarkChessGame&>(*game_);
+  game.default_observer_->WriteTensor(*this, &allocator);
 }
 
 

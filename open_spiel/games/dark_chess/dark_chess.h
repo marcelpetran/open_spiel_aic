@@ -106,10 +106,6 @@ class DarkChessState : public State {
     return last_seen_[chess::ToInt(color)][(int) piece_type - 1];
   }
 
-  int TotalPieces() const { return total_pieces_; }
-
-  void AddPiece() { total_pieces_++; }
-
   int Pawns(chess::Color color) const { return color == chess::Color::kWhite ? w_pawns : b_pawns; }
   int Rooks(chess::Color color) const { return color == chess::Color::kWhite ? w_rooks : b_rooks; }
   int Knights(chess::Color color) const { return color == chess::Color::kWhite ? w_knights : b_knights; }
@@ -151,9 +147,8 @@ class DarkChessState : public State {
 
   // TODO(kubicon) This is specific for 8x8 chess and is here only for now.
   // For each color, each piece it stores the time when it was saw the last time at given position by opponent
-  std::vector<std::vector<std::vector<int>>> last_seen_;
+  std::array<std::array<std::vector<int>, 6>, 2> last_seen_;
 
-  int total_pieces_ = 0;
   int w_pawns = 0;
   int w_rooks = 0;
   int w_knights = 0;
@@ -195,7 +190,6 @@ class DarkChessGame : public Game {
         chess::Square sq{x, y};
         chess::Piece piece = state->Board().at(sq);
         if (piece.color != chess::Color::kEmpty) {
-          state->AddPiece();
           switch (piece.type) {
             case chess::PieceType::kPawn:
               state->AddPawn(piece.color);
