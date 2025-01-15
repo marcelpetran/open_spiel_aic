@@ -1503,8 +1503,8 @@ class RNaDSolver(policy_lib.Policy):
           f"Invalid StateRepresentation: {self.config.state_representation}.")
 
     # TODO(author16): clarify the story around rewards and valid.
+    # current obs tensor shape (bs, bs, 16) and state tensor shape (bs, bs, 14) where bs is board size
     return EnvStep(
-      # current obs shape (bs, bs, 16) and state tensor shape (bs, bs, 14) where bs is board size
         obs=np.transpose(np.array(obs, dtype=np.float64).reshape(self._obs_shape[::-1]), (1, 2, 0)),
         state=np.transpose(np.array(state.state_tensor(), dtype=np.float64).reshape(self._state_shape[::-1]), (1, 2, 0)),
         legal=np.array(state.legal_actions_mask(), dtype=np.int8),
@@ -1580,11 +1580,13 @@ class RNaDSolver(policy_lib.Policy):
   
   def actor_step_jitted(self, env_step: EnvStep):
     keys = self._next_rng_keys(self.config.batch_size)
-    keys = np.asarray(keys)
+    # keys = np.asarray(keys)
+    # might be faster on GPU
+    keys = jax.random.split(self._rngkey, self.config.batch_size)
     pi, action, action_oh = self._network_jit_apply_sample(self._game.num_distinct_actions(), self.params, env_step, keys)
-    pi = np.asarray(pi, dtype=np.float32)
-    action = np.asarray(action, dtype=np.int32)
-    action_oh = np.asarray(action_oh, dtype=np.float32)
+    # pi = np.asarray(pi, dtype=np.float32)
+    # action = np.asarray(action, dtype=np.int32)
+    # action_oh = np.asarray(action_oh, dtype=np.float32)
 
     actor_step = ActorStep(policy=pi, action_oh=action_oh, rewards=())
 

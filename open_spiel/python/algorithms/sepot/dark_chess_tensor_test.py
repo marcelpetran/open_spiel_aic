@@ -6,7 +6,7 @@ import numpy as np
 
 import timeit
 
-from fen_parser import Game as fp
+from dark_chess_fen_parser import Game as fp
 
 # small fen example: "r1kr/pppp/PPPP/R1KR w - - 0 1"
 # standard fen example: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -49,9 +49,12 @@ def play_one_game():
   while not state.is_terminal():
     player = state.current_player()
    
-    fp_ot = fp_game.get_observation_tensor(player).reshape(board_size**2,16).transpose().flatten()
+    # fp_ot = fp_game.get_observation_tensor(player).reshape(board_size**2,16).transpose().flatten() # observation tensor
+    fp_ot = fp_game.get_state_tensor().reshape(board_size**2,14).transpose().flatten() # state tensor
+
     
-    ot = np.array(state.observation_tensor(player))
+    # ot = np.array(state.observation_tensor(player)) # observation tensor
+    ot = np.array(state.state_tensor()) # state tensor
 
     is_close = np.isclose(fp_ot, ot)
 
@@ -81,7 +84,7 @@ def play_one_game():
 
 
 if __name__ == "__main__":
-  total_games = 1
+  total_games = 100
   erros = 0
   for i in range(total_games):
     print(f"Game {i+1}/{total_games}")
