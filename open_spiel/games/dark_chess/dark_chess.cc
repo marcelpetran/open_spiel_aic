@@ -517,23 +517,12 @@ class DarkChessObserver : public Observer {
 
     // layer_0 to _5 ~ player's pieces
     for (const chess::PieceType& piece_type : chess::kPieceTypes) {
-      if (color == chess::Color::kWhite) {
-        WritePieces(chess::Color::kWhite, piece_type, state.Board(),
-                          private_info_table, prefix, allocator);
-      }
-      else {
-        WritePieces(chess::Color::kBlack, piece_type, state.Board(),
-                  private_info_table, prefix, allocator);
-      }
+      WritePieces(color, piece_type, state.Board(),
+                        private_info_table, prefix, allocator);
     }
     // layer_6 to _11 ~ last seen pieces
     for (const chess::PieceType& piece_type : chess::kPieceTypes) {
-      if (color == chess::Color::kWhite) {
-        WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kBlack, piece_type, state.LastSeenPiece(chess::Color::kBlack, piece_type), prefix, allocator);
-      }
-      else {
-        WriteLastSeenPieces(state.Board().BoardSize(), chess::Color::kWhite, piece_type, state.LastSeenPiece(chess::Color::kWhite, piece_type), prefix, allocator);
-      }
+      WriteLastSeenPieces(state.Board().BoardSize(), OppColor(color), piece_type, state.LastSeenPiece(OppColor(color), piece_type), prefix, allocator);
     }
     // layer_12 and _13 ~ empty squares and unknown squares
     WritePieces(chess::Color::kEmpty, chess::PieceType::kEmpty, state.Board(),

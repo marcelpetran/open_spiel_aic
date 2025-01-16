@@ -49,12 +49,12 @@ def play_one_game():
   while not state.is_terminal():
     player = state.current_player()
    
-    # fp_ot = fp_game.get_observation_tensor(player).reshape(board_size**2,16).transpose().flatten() # observation tensor
-    fp_ot = fp_game.get_state_tensor().reshape(board_size**2,14).transpose().flatten() # state tensor
+    fp_ot = fp_game.get_observation_tensor(player).reshape(board_size**2,16).transpose().flatten() # observation tensor
+    # fp_ot = fp_game.get_state_tensor().reshape(board_size**2,14).transpose().flatten() # state tensor
 
     
-    # ot = np.array(state.observation_tensor(player)) # observation tensor
-    ot = np.array(state.state_tensor()) # state tensor
+    ot = np.array(state.observation_tensor(player)) # observation tensor
+    # ot = np.array(state.state_tensor()) # state tensor
 
     is_close = np.isclose(fp_ot, ot)
 
